@@ -1,6 +1,6 @@
 package config
 
-type OpensslConfig struct {
+type ContainerConfig struct {
 	eConfig
 	//Curlpath   string `json:"curlPath"` //curl的文件路径
 	Openssl    string `json:"openssl"`
@@ -15,4 +15,8 @@ type OpensslConfig struct {
 	ElfType    uint8  //
 	IsAndroid  bool   //	is Android OS ?
 	AndroidVer string // Android OS version
+}
+
+func (oc *ContainerConfig) Check() error {
+	return nil
 }

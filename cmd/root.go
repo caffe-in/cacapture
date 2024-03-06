@@ -66,4 +66,13 @@ func cacaptureCommandFunc(cmd *cobra.Command, args []string) {
 
 		logger.Printf("%s\tmodule initialization", mod.Name())
 
+		err = mod.Init(ctx,logger,&conf)
+		if err!=nil{
+			logger.Printf("Module %s init failed: %v",mod.Name(),err)
+			continue
+		}
+
+		err = mod.Run()
+
+
 }
