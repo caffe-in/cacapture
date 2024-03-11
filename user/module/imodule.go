@@ -173,18 +173,51 @@ func (m *Module) perfEventReader(errChan chan error, em *ebpf.Map) {
 }
 func (m *Module) Dispatcher(e event.IEventStruct) {
 	switch e.EventType() {
-	case event.EventTypeOutput:
-		if m.conf.GetHex() {
-			m.logger.Println(e.StringHex())
-		} else {
-			m.logger.Println(e.String())
-		}
-	case event.EventTypeEventProcessor:
-		m.processor.Write(e)
+	// case event.EventTypeOutput:
+	// 	if m.conf.GetHex() {
+	// 		m.logger.Println(e.StringHex())
+	// 	} else {
+	// 		m.logger.Println(e.String())
+	// 	}
+	// case event.EventTypeEventProcessor:
+	// 	m.processor.Write(e)
 	case event.EventTypeModuleData:
 		// Save to cache
 		m.child.Dispatcher(e)
 	default:
 		m.logger.Printf("%s\tunknown event type:%d", m.child.Name(), e.EventType())
 	}
+}
+func (m *Module) Close() error {
+	m.logger.Printf("%s\tclose", m.child.Name())
+	for _, iClose := range m.reader {
+		if err := iClose.Close(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+func (m *Module) DecodeFun(p *ebpf.Map) (event.IEventStruct, bool) {
+	panic("Module.DecodeFun() not implemented yet")
+}
+func (m *Module) Decode(em *ebpf.Map, b []byte) (event event.IEventStruct, err error) {
+
+	es, found := m.child.DecodeFun(em)
+	if !found {
+		err = fmt.Errorf("%s\tcan't found decode function :%s, address:%p", m.child.Name(), em.String(), em)
+		return
+	}
+
+	te := es.Clone()
+	err = te.Decode(b)
+	if err != nil {
+		return nil, err
+	}
+	return te, nil
+}
+func (m *Module) Events() []*ebpf.Map {
+	panic("Module.Events() not implemented yet")
+}
+func (m *Module) Stop() error {
+	return nil
 }

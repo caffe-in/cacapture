@@ -13,7 +13,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var rc = config.Config{}
+var rc = &config.ContainerConfig{}
 
 var rootCmd = &cobra.Command{
 	Use:   "cacapture",
@@ -44,35 +44,64 @@ func cacaptureCommandFunc(cmd *cobra.Command, args []string) {
 	ctx, cancelFun := context.WithCancel(context.Background())
 
 	logger := log.New(os.Stdout, "cacapture: ", log.LstdFlags)
-	conf, err := getConf(cmd)
-	if err != nil {
-		logger.Println("Error:", err)
-		return
-	}
+	// gConf, err := getGlobalConf(cmd)
+	// if err != nil {
+	// 	logger.Println("Error:", err)
+	// 	return
+	// }
 
 	logger.Printf("CACAPTURE:: Pid Info: %d", os.Getpid())
 
-	var modNames=[]string{module.IModule}
+	var modNames = []string{module.ModuleNameContainer}
 
-	var runMods unit8
-	var runModules =make(map[string]module.IModule)
+	var runMods uint8
+	var runModules = make(map[string]module.IModule)
 	var wg sync.WaitGroup
 	for _, modName := range modNames {
-		mod :=module.GetModuleByName(modName)
-		if mod==nil{
-			logger.Printf("Module %s not found",modName)
+		mod := module.GetModuleByName(modName)
+		if mod == nil {
+			logger.Printf("Module %s not found", modName)
 			break
 		}
 
 		logger.Printf("%s\tmodule initialization", mod.Name())
+		var conf config.IConfig
+		conf = rc
 
-		err = mod.Init(ctx,logger,&conf)
-		if err!=nil{
-			logger.Printf("Module %s init failed: %v",mod.Name(),err)
+		err := mod.Init(ctx, logger, conf)
+		if err != nil {
+			logger.Printf("Module %s init failed: %v", mod.Name(), err)
 			continue
 		}
 
 		err = mod.Run()
+		if err != nil {
+			logger.Printf("%s\tmodule run failed, [skip it]. error:%+v", mod.Name(), err)
+			continue
+		}
 
+		runModules[mod.Name()] = mod
+		logger.Printf("%s\tmodule started successfully.", mod.Name())
+		wg.Add(1)
+		runMods++
+	}
+
+	if runMods > 0 {
+		logger.Printf("ECAPTURE :: \tstart %d modules", runMods)
+		<-stopper
+	} else {
+		logger.Println("ECAPTURE :: \tNo runnable modules, Exit(1)")
+		os.Exit(1)
+	}
+	cancelFun()
+	for _, mod := range runModules {
+		err := mod.Close()
+		wg.Done()
+		if err != nil {
+			logger.Fatalf("%s\tmodule close failed. error:%+v", mod.Name(), err)
+		}
+	}
+	wg.Wait()
+	os.Exit(0)
 
 }

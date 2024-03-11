@@ -12,9 +12,7 @@ const (
 	EvpMaxMdSize       = 64
 )
 
-type TlsVersion struct {
-	Version int32
-}
+
 
 type MasterSecretEvent struct {
 	eventType EventType

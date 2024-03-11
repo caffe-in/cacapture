@@ -152,43 +152,58 @@ func (m *MContainerProbe) constantEditor() []manager.ConstantEditor {
 
 	return editor
 }
+func (m *MContainerProbe) AddConn(pid, fd uint32, addr string) {
+	if fd <= 0 {
+		m.logger.Printf("%s\tAddConn failed. pid:%d, fd:%d, addr:%s\n", m.Name(), pid, fd, addr)
+		return
+	}
+	// save
+	var connMap map[uint32]string
+	var f bool
+	connMap, f = m.pidConns[pid]
+	if !f {
+		connMap = make(map[uint32]string)
+	}
+	connMap[fd] = addr
+	m.pidConns[pid] = connMap
+	//m.logger.Printf("%s\tAddConn pid:%d, fd:%d, addr:%s, mapinfo:%v\n", m.Name(), pid, fd, addr, m.pidConns)
+	return
+}
 
 func (m *MContainerProbe) Dispatcher(eventStruct event.IEventStruct) {
 	// detect eventStruct type
 	switch eventStruct.(type) {
 	case *event.ConnDataEvent:
 		m.AddConn(eventStruct.(*event.ConnDataEvent).Pid, eventStruct.(*event.ConnDataEvent).Fd, eventStruct.(*event.ConnDataEvent).Addr)
-	case *event.MasterSecretEvent:
-		m.saveMasterSecret(eventStruct.(*event.MasterSecretEvent))
-	case *event.MasterSecretBSSLEvent:
-		m.saveMasterSecretBSSL(eventStruct.(*event.MasterSecretBSSLEvent))
 	case *event.TcSkbEvent:
 		err := m.dumpTcSkb(eventStruct.(*event.TcSkbEvent))
 		if err != nil {
 			m.logger.Printf("%s\t save packet error %s .\n", m.Name(), err.Error())
 		}
-	case *event.SSLDataEvent:
-		m.dumpSslData(eventStruct.(*event.SSLDataEvent))
+		// case *event.SSLDataEvent:
+		// 	m.dumpSslData(eventStruct.(*event.SSLDataEvent))
 	}
 	//m.logger.Println(eventStruct)
 }
 
-func (m *MOpenSSLProbe) dumpSslData(eventStruct *event.SSLDataEvent) {
-	if eventStruct.Fd <= 0 {
-		m.logger.Printf("\tnotice: SSLDataEvent's fd is 0.  pid:%d, fd:%d, addr:%s\n", eventStruct.Pid, eventStruct.Fd, eventStruct.Addr)
+func (m *MContainerProbe) Close() error {
+	if m.eBPFProgramType == TlsCaptureModelTypePcap {
+		m.logger.Printf("%s\tsaving pcapng file %s\n", m.Name(), m.pcapngFilename)
+		i, err := m.savePcapng()
+		if err != nil {
+			m.logger.Printf("%s\tsave pcanNP failed, error:%v. \n", m.Name(), err)
+		}
+
+		if i == 0 {
+			m.logger.Printf("nothing captured, please check your network interface, see \"ecapture tls -h\" for more information.")
+		} else {
+			m.logger.Printf("%s\t save %d packets into pcapng file.\n", m.Name(), i)
+		}
+
 	}
-	var addr = m.GetConn(eventStruct.Pid, eventStruct.Fd)
-	//m.logger.Printf("\tSSLDataEvent pid:%d, fd:%d, addr:%s\n", eventStruct.Pid, eventStruct.Fd, addr)
-	if addr == ConnNotFound {
-		eventStruct.Addr = DefaultAddr
-	} else {
-		eventStruct.Addr = addr
+	m.logger.Printf("%s\tclose. \n", m.Name())
+	if err := m.bpfManager.Stop(manager.CleanAll); err != nil {
+		return fmt.Errorf("couldn't stop manager %v .", err)
 	}
-	//m.processor.PcapFile(eventStruct)
-	if m.conf.GetHex() {
-		m.logger.Println(eventStruct.StringHex())
-	} else {
-		eventStruct.WriteFile("/root/project/ecapture/ecapture.txt")
-		m.logger.Println(eventStruct.String())
-	}
+	return m.Module.Close()
 }
