@@ -5,13 +5,19 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "capture msg",
+            
+            "name": "pcap mode",
             "type": "go",
             "request": "launch",
             "mode": "debug",
-            "program": "${workspaceFolder}",
-            "console": "integratedTerminal",
             "asRoot": true,
-        }
+            "console": "integratedTerminal",          
+            "program": "main.go",
+            "args": [
+             "--containerID", "9659b0ad9aea",
+             "--ifname","eth0",
+             "--PcapFile","test.pcapng",
+            ],
+         }
     ]
 }

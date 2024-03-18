@@ -12,6 +12,8 @@ import (
 	"github.com/cilium/ebpf/perf"
 )
 
+var Lost_samples_num = 0
+
 type IModule interface {
 	// Init 初始化
 	Init(context.Context, *log.Logger, config.IConfig) error
@@ -155,6 +157,7 @@ func (m *Module) perfEventReader(errChan chan error, em *ebpf.Map) {
 			}
 
 			if record.LostSamples != 0 {
+				Lost_samples_num += int(record.LostSamples)
 				m.logger.Printf("%s\tperf event ring buffer full, dropped %d samples", m.child.Name(), record.LostSamples)
 				continue
 			}

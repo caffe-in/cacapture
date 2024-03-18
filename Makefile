@@ -9,4 +9,4 @@ $(APPS):
 vmlinux:
 	bpftool btf dump file /sys/kernel/btf/vmlinux format c > $(SRC_DIR)/vmlinux.h
 asset:
-	go run github.com/shuLhan/go-bindata/cmd/go-bindata -pkg assets -o "assets/ebpf_probe.go" "kern/tc.o"
+	go run github.com/shuLhan/go-bindata/cmd/go-bindata -pkg assets -o "assets/ebpf_probe.go" "user/bytecode/tc.o"

@@ -7,10 +7,17 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"runtime"
 	"sync"
 	"syscall"
 
 	"github.com/spf13/cobra"
+	"github.com/vishvananda/netns"
+)
+
+const (
+	defaultPid uint64 = 0
+	defaultUid uint64 = 0
 )
 
 var rc = &config.ContainerConfig{}
@@ -23,8 +30,15 @@ var rootCmd = &cobra.Command{
 }
 
 func init() {
+	log.Println("hello")
+	rootCmd.PersistentFlags().BoolVarP(&rc.Debug, "debug", "d", false, "enable debug logging.(coming soon)")
+	rootCmd.PersistentFlags().BoolVar(&rc.IsHex, "hex", false, "print byte strings as hex encoded strings")
+	rootCmd.PersistentFlags().IntVar(&rc.PerCpuMapSize, "mapsize", 20480, "eBPF map size per CPU,for events buffer. default:1024 * PAGESIZE. (KB)")
+	rootCmd.PersistentFlags().Uint64VarP(&rc.Pid, "pid", "p", defaultPid, "if pid is 0 then we target all pids")
+	rootCmd.PersistentFlags().Uint64VarP(&rc.Uid, "uid", "u", defaultUid, "if uid is 0 then we target all users")
 	rootCmd.PersistentFlags().StringVar(&rc.ContainerID, "containerID", "", "containerID")
 	rootCmd.PersistentFlags().StringVar(&rc.Ifname, "ifname", "", "ifname")
+	rootCmd.PersistentFlags().StringVar(&rc.PcapFile, "PcapFile", "", "pcapngFilename")
 }
 
 func getConf(command *cobra.Command) (conf config.Config, err error) {
@@ -39,6 +53,9 @@ func getConf(command *cobra.Command) (conf config.Config, err error) {
 	return conf, nil
 }
 func cacaptureCommandFunc(cmd *cobra.Command, args []string) {
+
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	stopper := make(chan os.Signal, 1)
 	signal.Notify(stopper, os.Interrupt, syscall.SIGTERM)
 	ctx, cancelFun := context.WithCancel(context.Background())
@@ -57,6 +74,20 @@ func cacaptureCommandFunc(cmd *cobra.Command, args []string) {
 	var runMods uint8
 	var runModules = make(map[string]module.IModule)
 	var wg sync.WaitGroup
+
+	nsHandle, err := netns.GetFromDocker(rc.ContainerID)
+	if err != nil {
+		logger.Printf("Container %s cann't find: %v", rc.ContainerID, err)
+		panic(err)
+	}
+	defer nsHandle.Close()
+
+	err = netns.Set(nsHandle)
+	if err != nil {
+		logger.Printf("Container %s namespace cann't set: %v", rc.ContainerID, err)
+		panic(err)
+	}
+
 	for _, modName := range modNames {
 		mod := module.GetModuleByName(modName)
 		if mod == nil {
@@ -67,6 +98,7 @@ func cacaptureCommandFunc(cmd *cobra.Command, args []string) {
 		logger.Printf("%s\tmodule initialization", mod.Name())
 		var conf config.IConfig
 		conf = rc
+		conf.SetPerCpuMapSize(1024)
 
 		err := mod.Init(ctx, logger, conf)
 		if err != nil {
@@ -102,6 +134,13 @@ func cacaptureCommandFunc(cmd *cobra.Command, args []string) {
 		}
 	}
 	wg.Wait()
+	logger.Println("lost_sample")
 	os.Exit(0)
 
+}
+
+func Execute() {
+	if err := rootCmd.Execute(); err != nil {
+		os.Exit(1)
+	}
 }

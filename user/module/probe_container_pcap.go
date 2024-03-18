@@ -14,7 +14,7 @@ import (
 )
 
 func (m *MContainerProbe) setupManagerPcap() error {
-	var ifname, binaryPath string
+	var ifname string // binaryPath
 
 	ifname = m.conf.(*config.ContainerConfig).Ifname
 	m.ifName = ifname
@@ -46,7 +46,7 @@ func (m *MContainerProbe) setupManagerPcap() error {
 		Ifname:           m.ifName,
 		NetworkDirection: manager.Ingress,
 	})
-	binaryPath = m.conf.(*config.ContainerConfig).Openssl
+	// binaryPath = m.conf.(*config.ContainerConfig).Openssl
 	m.sslBpfFile = "tc.o" // assinged by caffein
 	// m.logger.Printf("%s\tHOOK type:%d, binrayPath:%s\n", m.Name(), m.conf.(*config.ContainerConfig).ElfType, binaryPath)
 	// m.logger.Printf("%s\tIfname:%s, Ifindex:%d,  Port:%d, Pcapng filepath:%s\n", m.Name(), m.ifName, m.ifIdex, m.conf.(*config.ContainerConfig).Port, m.pcapngFilename)
@@ -60,13 +60,13 @@ func (m *MContainerProbe) setupManagerPcap() error {
 	if err != nil {
 		return err
 	}
-	probes = append(probes, &manager.Probe{
-		Section:          "uprobe/SSL_write_key",
-		EbpfFuncName:     "probe_ssl_master_key",
-		AttachToFuncName: m.masterHookFunc, // SSL_do_handshake or SSL_write
-		BinaryPath:       binaryPath,
-		UID:              "uprobe_ssl_master_key",
-	})
+	// probes = append(probes, &manager.Probe{
+	// 	Section:          "uprobe/SSL_write_key",
+	// 	EbpfFuncName:     "probe_ssl_master_key",
+	// 	AttachToFuncName: m.masterHookFunc, // SSL_do_handshake or SSL_write
+	// 	BinaryPath:       binaryPath,
+	// 	UID:              "uprobe_ssl_master_key",
+	// })
 	probes = append(probes, &manager.Probe{
 		EbpfFuncName:     "tcp_sendmsg",
 		Section:          "kprobe/tcp_sendmsg",
@@ -76,9 +76,9 @@ func (m *MContainerProbe) setupManagerPcap() error {
 		Probes: probes,
 
 		Maps: []*manager.Map{
-			{
-				Name: "mastersecret_events",
-			},
+			// {
+			// 	Name: "mastersecret_events",
+			// },
 			{
 				Name: "skb_events",
 			},
@@ -121,20 +121,20 @@ func (m *MContainerProbe) initDecodeFunPcap() error {
 	//sslEvent.SetModule(m)
 	m.eventFuncMaps[SkbEventsMap] = sslEvent
 
-	MasterkeyEventsMap, found, err := m.bpfManager.GetMap("mastersecret_events")
-	if err != nil {
-		return err
-	}
-	if !found {
-		return errors.New("cant found map:mastersecret_events")
-	}
-	m.eventMaps = append(m.eventMaps, MasterkeyEventsMap)
+	// MasterkeyEventsMap, found, err := m.bpfManager.GetMap("mastersecret_events")
+	// if err != nil {
+	// 	return err
+	// }
+	// if !found {
+	// 	return errors.New("cant found map:mastersecret_events")
+	// }
+	// m.eventMaps = append(m.eventMaps, MasterkeyEventsMap)
 
-	var masterkeyEvent event.IEventStruct
+	// var masterkeyEvent event.IEventStruct
 
-	masterkeyEvent = &event.MasterSecretEvent{}
+	// masterkeyEvent = &event.MasterSecretEvent{}
 
-	//masterkeyEvent.SetModule(m)
-	m.eventFuncMaps[MasterkeyEventsMap] = masterkeyEvent
+	// //masterkeyEvent.SetModule(m)
+	// m.eventFuncMaps[MasterkeyEventsMap] = masterkeyEvent
 	return nil
 }

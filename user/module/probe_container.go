@@ -98,6 +98,10 @@ func (m *MContainerProbe) start() error {
 
 	m.logger.Printf("%s\tPcapng MODEL\n", m.Name())
 	err = m.setupManagerPcap()
+	if err != nil {
+		return err
+
+	}
 
 	var bpfFileName = filepath.Join("user/bytecode", m.sslBpfFile)
 	m.logger.Printf("%s\tBPF bytecode filename:%s\n", m.Name(), bpfFileName)
@@ -198,6 +202,8 @@ func (m *MContainerProbe) Close() error {
 			m.logger.Printf("nothing captured, please check your network interface, see \"ecapture tls -h\" for more information.")
 		} else {
 			m.logger.Printf("%s\t save %d packets into pcapng file.\n", m.Name(), i)
+			m.logger.Printf("lost packet num is %d\n", Lost_samples_num)
+			m.logger.Printf("lost rate is %f\n", float64(Lost_samples_num)/float64(i+Lost_samples_num))
 		}
 
 	}
@@ -206,4 +212,17 @@ func (m *MContainerProbe) Close() error {
 		return fmt.Errorf("couldn't stop manager %v .", err)
 	}
 	return m.Module.Close()
+}
+func (m *MContainerProbe) Events() []*ebpf.Map {
+	return m.eventMaps
+}
+func (m *MContainerProbe) DecodeFun(em *ebpf.Map) (event.IEventStruct, bool) {
+	fun, found := m.eventFuncMaps[em]
+	return fun, found
+}
+func init() {
+	mod := &MContainerProbe{}
+	mod.name = ModuleNameContainer
+	mod.mType = ProbeTypeUprobe
+	Register(mod)
 }
