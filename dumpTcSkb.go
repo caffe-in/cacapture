@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"cacapture/pkg/util/ethernet"
 	"encoding/binary"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"math"
 	"net"
@@ -142,31 +140,6 @@ func (t *MTCProbe) writePid(tcEvent *TcSkbEvent) (error, []byte) {
 }
 
 // save json line file, merge master key and packert info into json line file
-func (t *MTCProbe) saveJsonLine() (i int, err error) {
-
-	file, err := os.OpenFile(strings.Replace(t.pcapngFilename, "pcapng", "jsonl", -1), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
-	if err != nil {
-		return 0, err
-	}
-	defer file.Close()
-	t.tcPacketLocker.Lock()
-	defer t.tcPacketLocker.Unlock()
-	temp_json := map[string][]byte{"masterKey": t.masterKeyBuffer.Bytes()}
-	temp, err := json.Marshal(temp_json)
-	if err != nil {
-		return 0, err
-	}
-	file.WriteString(string(temp) + "\n")
-	for i, packet := range t.tcPackets {
-		dataHex := hex.EncodeToString(packet.data)
-		temp, err := json.Marshal(map[string]interface{}{"id": i, "info": packet.info, "data": dataHex})
-		if err != nil {
-			return 0, err
-		}
-		file.WriteString(string(temp) + "\n")
-	}
-	return i, nil
-}
 
 // save pcapng file ,merge master key into pcapng file TODO
 func (t *MTCProbe) savePcapng() (i int, err error) {
@@ -266,6 +239,12 @@ func (t *MTCProbe) writePacket(dataLen uint32, timeStamp time.Time, packetBytes 
 	packet := &TcPacket{info: info, data: packetBytes}
 
 	t.tcPackets = append(t.tcPackets, packet)
+	if len(t.tcPackets) >= 1000 {
+		_, err := t.savePcapng()
+		if err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

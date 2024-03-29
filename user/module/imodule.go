@@ -14,6 +14,8 @@ import (
 
 var Lost_samples_num = 0
 
+const numWorkers = 4
+
 type IModule interface {
 	// Init 初始化
 	Init(context.Context, *log.Logger, config.IConfig) error
@@ -138,6 +140,23 @@ func (m *Module) perfEventReader(errChan chan error, em *ebpf.Map) {
 		return
 	}
 	m.reader = append(m.reader, rd)
+
+	// todo: multi-thread to process events
+	// eventChan := make(chan []byte, 100)
+	// for i := 0; i < numWorkers; i++ {
+	// 	go func() {
+	// 		for rawEvent := range eventChan {
+	// 			var e event.IEventStruct
+	// 			e, err = m.child.Decode(em, rawEvent)
+	// 			if err != nil {
+	// 				m.logger.Printf("%s\tm.child.decode error:%v", m.child.Name(), err)
+	// 				continue
+	// 			}
+	// 			m.Dispatcher(e)
+	// 		}
+	// 	}()
+	// }
+
 	go func() {
 		for {
 			//判断ctx是不是结束
@@ -148,10 +167,12 @@ func (m *Module) perfEventReader(errChan chan error, em *ebpf.Map) {
 			default:
 			}
 			record, err := rd.Read()
+			// PacketCount++
 			if err != nil {
 				if errors.Is(err, perf.ErrClosed) {
 					return
 				}
+
 				errChan <- fmt.Errorf("%s\treading from perf event reader: %s", m.child.Name(), err)
 				return
 			}
@@ -171,7 +192,10 @@ func (m *Module) perfEventReader(errChan chan error, em *ebpf.Map) {
 
 			// 上报数据
 			m.Dispatcher(e)
+
+			// eventChan <- record.RawSample
 		}
+
 	}()
 }
 func (m *Module) Dispatcher(e event.IEventStruct) {

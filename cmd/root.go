@@ -33,7 +33,7 @@ func init() {
 	log.Println("hello")
 	rootCmd.PersistentFlags().BoolVarP(&rc.Debug, "debug", "d", false, "enable debug logging.(coming soon)")
 	rootCmd.PersistentFlags().BoolVar(&rc.IsHex, "hex", false, "print byte strings as hex encoded strings")
-	rootCmd.PersistentFlags().IntVar(&rc.PerCpuMapSize, "mapsize", 20480, "eBPF map size per CPU,for events buffer. default:1024 * PAGESIZE. (KB)")
+	rootCmd.PersistentFlags().IntVar(&rc.PerCpuMapSize, "mapsize", 1024, "eBPF map size per CPU,for events buffer. default:1024 * PAGESIZE. (KB)")
 	rootCmd.PersistentFlags().Uint64VarP(&rc.Pid, "pid", "p", defaultPid, "if pid is 0 then we target all pids")
 	rootCmd.PersistentFlags().Uint64VarP(&rc.Uid, "uid", "u", defaultUid, "if uid is 0 then we target all users")
 	rootCmd.PersistentFlags().StringVar(&rc.ContainerID, "containerID", "", "containerID")
@@ -98,7 +98,7 @@ func cacaptureCommandFunc(cmd *cobra.Command, args []string) {
 		logger.Printf("%s\tmodule initialization", mod.Name())
 		var conf config.IConfig
 		conf = rc
-		conf.SetPerCpuMapSize(1024)
+		conf.SetPerCpuMapSize(rc.PerCpuMapSize)
 
 		err := mod.Init(ctx, logger, conf)
 		if err != nil {

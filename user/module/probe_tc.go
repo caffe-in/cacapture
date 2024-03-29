@@ -20,6 +20,10 @@ import (
 
 const EcaptureMagic = 0xCC0C4CFC
 
+const BufferPacketNum = 2
+
+var PacketCount = 0
+
 type packetMetaData struct {
 	Magic  uint32 `struc:"uint32"`
 	Pid    uint32 `struc:"uint32"`
@@ -40,6 +44,8 @@ type MTCProbe struct {
 	tcPackets       []*TcPacket
 	masterKeyBuffer *bytes.Buffer
 	tcPacketLocker  *sync.Mutex
+
+	tc_buffer_packets int
 }
 
 func (p *packetMetaData) Pack() ([]byte, error) {
@@ -70,7 +76,6 @@ func (p *packetMetaData) Pack() ([]byte, error) {
 func (t *MTCProbe) writePacket(dataLen uint32, timeStamp time.Time, packetBytes []byte) error {
 
 	// TODO add packetMeta info (e.g: process. pid, commom, etc.)
-
 	info := gopacket.CaptureInfo{
 		Timestamp:     timeStamp,
 		CaptureLength: int(dataLen),
@@ -85,6 +90,14 @@ func (t *MTCProbe) writePacket(dataLen uint32, timeStamp time.Time, packetBytes 
 	packet := &TcPacket{info: info, data: packetBytes}
 
 	t.tcPackets = append(t.tcPackets, packet)
+	if len(t.tcPackets) >= BufferPacketNum {
+		i, err := t.savePcapng()
+		if err != nil {
+			return err
+		}
+		PacketCount += i
+		t.tcPackets = t.tcPackets[:0]
+	}
 	return nil
 }
 
@@ -164,7 +177,7 @@ func (t *MTCProbe) savePcapng() (i int, err error) {
 		return
 	}
 	err = t.pcapWriter.Flush()
-	return
+	return i, err
 }
 func (t *MTCProbe) createPcapng(netIfs []net.Interface) error {
 	pcapFile, err := os.OpenFile(t.pcapngFilename, os.O_TRUNC|os.O_WRONLY|os.O_CREATE, 0644)

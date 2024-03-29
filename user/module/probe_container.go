@@ -194,16 +194,18 @@ func (m *MContainerProbe) Close() error {
 	if m.eBPFProgramType == TlsCaptureModelTypePcap {
 		m.logger.Printf("%s\tsaving pcapng file %s\n", m.Name(), m.pcapngFilename)
 		i, err := m.savePcapng()
+
 		if err != nil {
 			m.logger.Printf("%s\tsave pcanNP failed, error:%v. \n", m.Name(), err)
 		}
-
-		if i == 0 {
+		PacketCount += i
+		if PacketCount == 0 {
 			m.logger.Printf("nothing captured, please check your network interface, see \"ecapture tls -h\" for more information.")
 		} else {
-			m.logger.Printf("%s\t save %d packets into pcapng file.\n", m.Name(), i)
+
+			m.logger.Printf("%s\t save %d packets into pcapng file.\n", m.Name(), PacketCount)
 			m.logger.Printf("lost packet num is %d\n", Lost_samples_num)
-			m.logger.Printf("lost rate is %f\n", float64(Lost_samples_num)/float64(i+Lost_samples_num))
+			m.logger.Printf("lost rate is %f\n", float64(Lost_samples_num)/float64(PacketCount+Lost_samples_num))
 		}
 
 	}
