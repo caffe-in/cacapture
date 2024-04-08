@@ -148,8 +148,8 @@ func (t *MTCProbe) savePcapng() (i int, err error) {
 		return
 	}
 	fmt.Println("write pcapng")
-	t.tcPacketLocker.Lock()
-	defer t.tcPacketLocker.Unlock()
+	// t.tcPacketLocker.Lock()
+	// defer t.tcPacketLocker.Unlock()
 	for _, packet := range t.tcPackets {
 		err = t.pcapWriter.WritePacket(packet.info, packet.data)
 		i++

@@ -142,20 +142,20 @@ func (m *Module) perfEventReader(errChan chan error, em *ebpf.Map) {
 	m.reader = append(m.reader, rd)
 
 	// todo: multi-thread to process events
-	// eventChan := make(chan []byte, 100)
-	// for i := 0; i < numWorkers; i++ {
-	// 	go func() {
-	// 		for rawEvent := range eventChan {
-	// 			var e event.IEventStruct
-	// 			e, err = m.child.Decode(em, rawEvent)
-	// 			if err != nil {
-	// 				m.logger.Printf("%s\tm.child.decode error:%v", m.child.Name(), err)
-	// 				continue
-	// 			}
-	// 			m.Dispatcher(e)
-	// 		}
-	// 	}()
-	// }
+	eventChan := make(chan []byte, 100)
+	for i := 0; i < numWorkers; i++ {
+		go func() {
+			for rawEvent := range eventChan {
+				var e event.IEventStruct
+				e, err = m.child.Decode(em, rawEvent)
+				if err != nil {
+					m.logger.Printf("%s\tm.child.decode error:%v", m.child.Name(), err)
+					continue
+				}
+				m.Dispatcher(e)
+			}
+		}()
+	}
 
 	go func() {
 		for {
@@ -183,17 +183,17 @@ func (m *Module) perfEventReader(errChan chan error, em *ebpf.Map) {
 				continue
 			}
 
-			var e event.IEventStruct
-			e, err = m.child.Decode(em, record.RawSample)
-			if err != nil {
-				m.logger.Printf("%s\tm.child.decode error:%v", m.child.Name(), err)
-				continue
-			}
+			// var e event.IEventStruct
+			// e, err = m.child.Decode(em, record.RawSample)
+			// if err != nil {
+			// 	m.logger.Printf("%s\tm.child.decode error:%v", m.child.Name(), err)
+			// 	continue
+			// }
 
-			// 上报数据
-			m.Dispatcher(e)
+			// // 上报数据
+			// m.Dispatcher(e)
 
-			// eventChan <- record.RawSample
+			eventChan <- record.RawSample
 		}
 
 	}()

@@ -100,6 +100,8 @@ func (t *MTCProbe) writePacket(dataLen uint32, timeStamp time.Time, packetBytes 
 
 	packet := &TcPacket{info: info, data: packetBytes}
 
+	t.tcPacketLocker.Lock()
+	defer t.tcPacketLocker.Unlock()
 	t.tcPackets = append(t.tcPackets, packet)
 	if len(t.tcPackets) >= BufferPacketNum {
 		i, err := t.savePcapng()
@@ -213,8 +215,8 @@ func (t *MTCProbe) savePcapng() (i int, err error) {
 	if err != nil {
 		return
 	}
-	t.tcPacketLocker.Lock()
-	defer t.tcPacketLocker.Unlock()
+	// t.tcPacketLocker.Lock()
+	// defer t.tcPacketLocker.Unlock()
 	for _, packet := range t.tcPackets {
 		err = t.pcapWriter.WritePacket(packet.info, packet.data)
 		i++
