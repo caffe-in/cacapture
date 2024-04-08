@@ -17,7 +17,3 @@ type ContainerConfig struct {
 	IsAndroid   bool   //	is Android OS ?
 	AndroidVer  string // Android OS version
 }
-
-func (oc *ContainerConfig) Check() error {
-	return nil
-}

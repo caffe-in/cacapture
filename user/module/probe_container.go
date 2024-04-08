@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"path/filepath"
 	"sync"
@@ -25,6 +26,7 @@ const (
 	TlsCaptureModelTypeText
 	TlsCaptureModelTypeKeylog
 )
+const SEND_NET = true
 
 type MContainerProbe struct {
 	Module
@@ -86,6 +88,8 @@ func (m *MContainerProbe) Init(ctx context.Context, logger *log.Logger, conf con
 	m.tcPackets = make([]*TcPacket, 0, 1024)
 	m.tcPacketLocker = &sync.Mutex{}
 	m.masterKeyBuffer = bytes.NewBuffer([]byte{})
+
+	m.InitUPDConn()
 	return nil
 
 }
@@ -95,6 +99,8 @@ func (m *MContainerProbe) Start() error {
 }
 func (m *MContainerProbe) start() error {
 	var err error
+
+	// start the udp conn
 
 	m.logger.Printf("%s\tPcapng MODEL\n", m.Name())
 	err = m.setupManagerPcap()
@@ -180,10 +186,18 @@ func (m *MContainerProbe) Dispatcher(eventStruct event.IEventStruct) {
 	case *event.ConnDataEvent:
 		m.AddConn(eventStruct.(*event.ConnDataEvent).Pid, eventStruct.(*event.ConnDataEvent).Fd, eventStruct.(*event.ConnDataEvent).Addr)
 	case *event.TcSkbEvent:
-		err := m.dumpTcSkb(eventStruct.(*event.TcSkbEvent))
-		if err != nil {
-			m.logger.Printf("%s\t save packet error %s .\n", m.Name(), err.Error())
+		if m.conf.GetSentNet() {
+			err := m.SendTcSkb(eventStruct.(*event.TcSkbEvent))
+			if err != nil {
+				m.logger.Printf("%s\t send packet error %s .\n", m.Name(), err.Error())
+			}
+		} else {
+			err := m.dumpTcSkb(eventStruct.(*event.TcSkbEvent))
+			if err != nil {
+				m.logger.Printf("%s\t save packet error %s .\n", m.Name(), err.Error())
+			}
 		}
+
 		// case *event.SSLDataEvent:
 		// 	m.dumpSslData(eventStruct.(*event.SSLDataEvent))
 	}
@@ -213,6 +227,7 @@ func (m *MContainerProbe) Close() error {
 	if err := m.bpfManager.Stop(manager.CleanAll); err != nil {
 		return fmt.Errorf("couldn't stop manager %v .", err)
 	}
+	m.CloseUPDConn()
 	return m.Module.Close()
 }
 func (m *MContainerProbe) Events() []*ebpf.Map {
@@ -221,6 +236,24 @@ func (m *MContainerProbe) Events() []*ebpf.Map {
 func (m *MContainerProbe) DecodeFun(em *ebpf.Map) (event.IEventStruct, bool) {
 	fun, found := m.eventFuncMaps[em]
 	return fun, found
+}
+func (m *MContainerProbe) InitUPDConn() error {
+	// change the m.conf.GetDstIP() to byte,byte,byte,byte
+	dstAddr := &net.UDPAddr{
+		IP:   net.ParseIP(m.conf.GetDstIP()).To4(),
+		Port: m.conf.GetDstPort(),
+	}
+
+	conn, err := net.DialUDP("udp", nil, dstAddr)
+	if err != nil {
+		fmt.Println("DialUDP failed: ", err)
+		return err
+	}
+	m.MTCProbe.UDP_conn = conn
+	return nil
+}
+func (m *MContainerProbe) CloseUPDConn() {
+	m.UDP_conn.Close()
 }
 func init() {
 	mod := &MContainerProbe{}

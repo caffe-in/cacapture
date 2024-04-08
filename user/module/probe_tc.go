@@ -6,6 +6,7 @@ import (
 	"cacapture/user/event"
 	"encoding/binary"
 	"fmt"
+	"log"
 	"math"
 	"net"
 	"os"
@@ -24,6 +25,14 @@ const BufferPacketNum = 2
 
 var PacketCount = 0
 
+const VNI_NUM = uint32(10)
+
+type VXLANHeader struct {
+	Flags uint8
+	_     [3]byte
+	VNI   [3]byte
+	_     uint8
+}
 type packetMetaData struct {
 	Magic  uint32 `struc:"uint32"`
 	Pid    uint32 `struc:"uint32"`
@@ -46,6 +55,8 @@ type MTCProbe struct {
 	tcPacketLocker  *sync.Mutex
 
 	tc_buffer_packets int
+
+	UDP_conn *net.UDPConn
 }
 
 func (p *packetMetaData) Pack() ([]byte, error) {
@@ -99,6 +110,45 @@ func (t *MTCProbe) writePacket(dataLen uint32, timeStamp time.Time, packetBytes 
 		t.tcPackets = t.tcPackets[:0]
 	}
 	return nil
+}
+
+func (t *MTCProbe) sendPacket(dataLen uint32, timeStamp time.Time, packetBytes []byte) error {
+
+	vxlanHeader := VXLANHeader{
+		Flags: 0x8,
+	}
+	vxlanHeader.VNI[0] = byte((VNI_NUM >> 16) & 0xFF) // 获取VNI的高8位
+	vxlanHeader.VNI[1] = byte((VNI_NUM >> 8) & 0xFF)  // 获取VNI的中间8位
+	vxlanHeader.VNI[2] = byte(VNI_NUM & 0xFF)         // 获取VNI的低8位
+
+	var buffer bytes.Buffer
+	binary.Write(&buffer, binary.BigEndian, vxlanHeader)
+	vxlanBytes := buffer.Bytes()
+
+	ethernetFrame := append(vxlanBytes, packetBytes...)
+
+	_, err := t.UDP_conn.Write(ethernetFrame)
+	if err != nil {
+		log.Println("Write to UDP failed: ", err, "the size of packetBytes is: ", len(ethernetFrame))
+
+		return err
+	}
+	return nil
+
+}
+func (t *MTCProbe) SendTcSkb(tcEvent *event.TcSkbEvent) error {
+	var timeStamp = t.bootTime + tcEvent.Ts
+	var payload []byte
+	payload = tcEvent.Payload()
+	if tcEvent.Pid > 0 {
+		err, p := t.writePid(tcEvent)
+		if err == nil {
+			payload = p
+			//fmt.Printf("pid:%d, comm:%s, cmdline:%s\n", tcEvent.Pid, tcEvent.Comm, tcEvent.Cmdline)
+		}
+	}
+	log.Printf("send packet to UDP, the size of payload is: %d", len(payload))
+	return t.sendPacket(uint32(len(payload)), time.Unix(0, int64(timeStamp)), payload)
 }
 
 func (t *MTCProbe) dumpTcSkb(tcEvent *event.TcSkbEvent) error {

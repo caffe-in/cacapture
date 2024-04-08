@@ -39,6 +39,10 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&rc.ContainerID, "containerID", "", "containerID")
 	rootCmd.PersistentFlags().StringVar(&rc.Ifname, "ifname", "", "ifname")
 	rootCmd.PersistentFlags().StringVar(&rc.PcapFile, "PcapFile", "", "pcapngFilename")
+	rootCmd.PersistentFlags().BoolVar(&rc.SentNet, "sentnet", false, "sent_net")
+	rootCmd.PersistentFlags().StringVar(&rc.DstIP, "dstIP", "172.16.8.64", "dstIP")
+	rootCmd.PersistentFlags().IntVar(&rc.DstPort, "dstPort", 4789, "dstPort")
+
 }
 
 func getConf(command *cobra.Command) (conf config.Config, err error) {

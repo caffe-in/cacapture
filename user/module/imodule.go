@@ -200,14 +200,7 @@ func (m *Module) perfEventReader(errChan chan error, em *ebpf.Map) {
 }
 func (m *Module) Dispatcher(e event.IEventStruct) {
 	switch e.EventType() {
-	// case event.EventTypeOutput:
-	// 	if m.conf.GetHex() {
-	// 		m.logger.Println(e.StringHex())
-	// 	} else {
-	// 		m.logger.Println(e.String())
-	// 	}
-	// case event.EventTypeEventProcessor:
-	// 	m.processor.Write(e)
+
 	case event.EventTypeModuleData:
 		// Save to cache
 		m.child.Dispatcher(e)

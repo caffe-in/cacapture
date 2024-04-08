@@ -20,6 +20,14 @@ type IConfig interface {
 	GetPerCpuMapSize() int
 	SetPerCpuMapSize(int)
 	EnableGlobalVar() bool //
+
+	GetSentNet() bool
+	SetSentNet(bool)
+
+	SetDstIP(string)
+	GetDstIP() string
+	SetDstPort(int)
+	GetDstPort() int
 }
 
 type eConfig struct {
@@ -29,6 +37,9 @@ type eConfig struct {
 	IsHex         bool
 	Debug         bool
 	Port          uint16
+	SentNet       bool
+	DstIP         string
+	DstPort       int
 }
 
 func (c *eConfig) GetPid() uint64 {
@@ -83,4 +94,28 @@ func (c *eConfig) EnableGlobalVar() bool {
 		return false
 	}
 	return true
+}
+
+func (c *eConfig) Check() error {
+	return nil
+}
+
+func (c *eConfig) GetSentNet() bool {
+	return c.SentNet
+}
+
+func (c *eConfig) SetSentNet(b bool) {
+	c.SentNet = b
+}
+func (c *eConfig) SetDstIP(ip string) {
+	c.DstIP = ip
+}
+func (c *eConfig) GetDstIP() string {
+	return c.DstIP
+}
+func (c *eConfig) SetDstPort(port int) {
+	c.DstPort = port
+}
+func (c *eConfig) GetDstPort() int {
+	return c.DstPort
 }
