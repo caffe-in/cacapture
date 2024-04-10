@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
@@ -207,6 +208,11 @@ func (m *MContainerProbe) Dispatcher(eventStruct event.IEventStruct) {
 func (m *MContainerProbe) Close() error {
 	if m.eBPFProgramType == TlsCaptureModelTypePcap {
 		m.logger.Printf("%s\tsaving pcapng file %s\n", m.Name(), m.pcapngFilename)
+		m.tcPacketLocker.Lock()
+		defer m.tcPacketLocker.Unlock()
+		sort.Slice(m.tcPackets, func(i, j int) bool {
+			return m.tcPackets[i].info.Timestamp.Before(m.tcPackets[j].info.Timestamp)
+		})
 		i, err := m.savePcapng()
 
 		if err != nil {

@@ -29,10 +29,10 @@ struct tc_bpf {
 		struct bpf_link *tcp_sendmsg;
 	} links;
 	struct tc_bpf__rodata {
-		u64 target_port;
-		u64 target_pid;
-		u64 target_uid;
-		u64 target_errno;
+		uint64_t target_port;
+		uint64_t target_pid;
+		uint64_t target_uid;
+		uint64_t target_errno;
 	} *rodata;
 
 #ifdef __cplusplus

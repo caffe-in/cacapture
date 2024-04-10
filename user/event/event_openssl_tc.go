@@ -3,6 +3,7 @@ package event
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 )
 
@@ -22,15 +23,20 @@ type TcSkbEvent struct {
 	payload   []byte
 }
 
+func (te *TcSkbEvent) SetPayload(payload []byte) {
+	te.payload = payload
+}
+
 func (te *TcSkbEvent) Decode(payload []byte) (err error) {
-	buf := bytes.NewBuffer(payload)
-	if err = binary.Read(buf, binary.LittleEndian, &te.Ts); err != nil {
+	// buf := bytes.NewBuffer(payload)
+	reader := bytes.NewReader(payload)
+	if err = binary.Read(reader, binary.LittleEndian, &te.Ts); err != nil {
 		return
 	}
-	if err = binary.Read(buf, binary.LittleEndian, &te.Pid); err != nil {
+	if err = binary.Read(reader, binary.LittleEndian, &te.Pid); err != nil {
 		return
 	}
-	if err = binary.Read(buf, binary.LittleEndian, &te.Comm); err != nil {
+	if err = binary.Read(reader, binary.LittleEndian, &te.Comm); err != nil {
 		return
 	}
 	//if err = binary.Read(buf, binary.LittleEndian, &te.Cmdline); err != nil {
@@ -38,17 +44,26 @@ func (te *TcSkbEvent) Decode(payload []byte) (err error) {
 	//}
 	//TODO
 	te.Cmdline[0] = 91 //ascii 91
-	if err = binary.Read(buf, binary.LittleEndian, &te.Len); err != nil {
+	if err = binary.Read(reader, binary.LittleEndian, &te.Len); err != nil {
 		return
 	}
-	if err = binary.Read(buf, binary.LittleEndian, &te.Ifindex); err != nil {
+	if err = binary.Read(reader, binary.LittleEndian, &te.Ifindex); err != nil {
 		return
 	}
-	tmpData := make([]byte, te.Len)
-	if err = binary.Read(buf, binary.LittleEndian, &tmpData); err != nil {
-		return
+	// tmpData := make([]byte, te.Len)
+	// if err = binary.Read(reader, binary.LittleEndian, &tmpData); err != nil {
+	// 	return
+	// }
+	// te.payload = tmpData
+	if int(reader.Len()) < int(te.Len) {
+		return errors.New("payload is too short to contain the expected data")
 	}
-	te.payload = tmpData
+	// 直接引用 payload 数据，避免拷贝
+	pos := len(payload) - reader.Len()
+
+	// 直接引用 payload 数据，避免拷贝
+	te.payload = payload[pos : pos+int(te.Len)]
+
 	return nil
 }
 

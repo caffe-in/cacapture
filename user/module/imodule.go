@@ -14,7 +14,7 @@ import (
 
 var Lost_samples_num = 0
 
-const numWorkers = 4
+const numWorkers = 0
 
 type IModule interface {
 	// Init 初始化
@@ -142,7 +142,8 @@ func (m *Module) perfEventReader(errChan chan error, em *ebpf.Map) {
 	m.reader = append(m.reader, rd)
 
 	// todo: multi-thread to process events
-	eventChan := make(chan []byte, 100)
+
+	eventChan := make(chan []byte, 1000)
 	for i := 0; i < numWorkers; i++ {
 		go func() {
 			for rawEvent := range eventChan {
@@ -182,18 +183,20 @@ func (m *Module) perfEventReader(errChan chan error, em *ebpf.Map) {
 				m.logger.Printf("%s\tperf event ring buffer full, dropped %d samples", m.child.Name(), record.LostSamples)
 				continue
 			}
+			if numWorkers < 1 {
+				var e event.IEventStruct
+				e, err = m.child.Decode(em, record.RawSample)
+				if err != nil {
+					m.logger.Printf("%s\tm.child.decode error:%v", m.child.Name(), err)
+					continue
+				}
+				// PacketCount++
+				// 上报数据
+				m.Dispatcher(e)
+			} else {
+				eventChan <- record.RawSample
+			}
 
-			// var e event.IEventStruct
-			// e, err = m.child.Decode(em, record.RawSample)
-			// if err != nil {
-			// 	m.logger.Printf("%s\tm.child.decode error:%v", m.child.Name(), err)
-			// 	continue
-			// }
-
-			// // 上报数据
-			// m.Dispatcher(e)
-
-			eventChan <- record.RawSample
 		}
 
 	}()

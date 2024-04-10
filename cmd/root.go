@@ -11,6 +11,9 @@ import (
 	"sync"
 	"syscall"
 
+	"net/http"
+	_ "net/http/pprof"
+
 	"github.com/spf13/cobra"
 	"github.com/vishvananda/netns"
 )
@@ -57,6 +60,9 @@ func getConf(command *cobra.Command) (conf config.Config, err error) {
 	return conf, nil
 }
 func cacaptureCommandFunc(cmd *cobra.Command, args []string) {
+	go func() {
+		log.Println(http.ListenAndServe(":6060", nil))
+	}()
 
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()

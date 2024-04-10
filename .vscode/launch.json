@@ -17,6 +17,7 @@
              "--containerID", "9659b0ad9aea",
              "--ifname","eth0",
              "--PcapFile","test.pcapng",
+             "--sentnet"
             ],
          }
     ]

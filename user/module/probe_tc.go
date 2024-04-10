@@ -10,6 +10,7 @@ import (
 	"math"
 	"net"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -21,9 +22,17 @@ import (
 
 const EcaptureMagic = 0xCC0C4CFC
 
-const BufferPacketNum = 2
+const BufferPacketNum = 4000
+
+const VXLANHeaderSize = 8
 
 var PacketCount = 0
+
+var vxlanBufferPool = sync.Pool{
+	New: func() interface{} {
+		return make([]byte, VXLANHeaderSize+1500)
+	},
+}
 
 const VNI_NUM = uint32(10)
 
@@ -104,6 +113,9 @@ func (t *MTCProbe) writePacket(dataLen uint32, timeStamp time.Time, packetBytes 
 	defer t.tcPacketLocker.Unlock()
 	t.tcPackets = append(t.tcPackets, packet)
 	if len(t.tcPackets) >= BufferPacketNum {
+		sort.Slice(t.tcPackets, func(i, j int) bool {
+			return t.tcPackets[i].info.Timestamp.Before(t.tcPackets[j].info.Timestamp)
+		})
 		i, err := t.savePcapng()
 		if err != nil {
 			return err
@@ -115,7 +127,7 @@ func (t *MTCProbe) writePacket(dataLen uint32, timeStamp time.Time, packetBytes 
 }
 
 func (t *MTCProbe) sendPacket(dataLen uint32, timeStamp time.Time, packetBytes []byte) error {
-
+	PacketCount++
 	vxlanHeader := VXLANHeader{
 		Flags: 0x8,
 	}
@@ -123,11 +135,17 @@ func (t *MTCProbe) sendPacket(dataLen uint32, timeStamp time.Time, packetBytes [
 	vxlanHeader.VNI[1] = byte((VNI_NUM >> 8) & 0xFF)  // 获取VNI的中间8位
 	vxlanHeader.VNI[2] = byte(VNI_NUM & 0xFF)         // 获取VNI的低8位
 
-	var buffer bytes.Buffer
-	binary.Write(&buffer, binary.BigEndian, vxlanHeader)
-	vxlanBytes := buffer.Bytes()
+	buffer := vxlanBufferPool.Get().([]byte)
+	buffer[0] = 0x08 // Flags字段，设置VXLAN头的标志位，其中0x08表示VNI存在
+	// 接下来的3个字节 (_ [3]byte) 默认为0，不需要操作
 
-	ethernetFrame := append(vxlanBytes, packetBytes...)
+	// 设置VNI字段
+	buffer[4] = byte((VNI_NUM >> 16) & 0xFF) // VNI的高8位
+	buffer[5] = byte((VNI_NUM >> 8) & 0xFF)  // VNI的中间8位
+	buffer[6] = byte(VNI_NUM & 0xFF)         // VNI的低8位
+
+	copy(buffer[VXLANHeaderSize:], packetBytes)
+	ethernetFrame := buffer
 
 	_, err := t.UDP_conn.Write(ethernetFrame)
 	if err != nil {
@@ -149,8 +167,10 @@ func (t *MTCProbe) SendTcSkb(tcEvent *event.TcSkbEvent) error {
 			//fmt.Printf("pid:%d, comm:%s, cmdline:%s\n", tcEvent.Pid, tcEvent.Comm, tcEvent.Cmdline)
 		}
 	}
-	log.Printf("send packet to UDP, the size of payload is: %d", len(payload))
+
+	// log.Printf("send packet to UDP, the size of payload is: %d", len(payload))
 	return t.sendPacket(uint32(len(payload)), time.Unix(0, int64(timeStamp)), payload)
+
 }
 
 func (t *MTCProbe) dumpTcSkb(tcEvent *event.TcSkbEvent) error {
