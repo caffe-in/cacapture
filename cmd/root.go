@@ -4,6 +4,7 @@ import (
 	"cacapture/user/config"
 	"cacapture/user/module"
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -24,6 +25,7 @@ const (
 )
 
 var rc = &config.ContainerConfig{}
+var OrignalNsHandle netns.NsHandle
 
 var rootCmd = &cobra.Command{
 	Use:   "cacapture",
@@ -36,7 +38,7 @@ func init() {
 	log.Println("hello")
 	rootCmd.PersistentFlags().BoolVarP(&rc.Debug, "debug", "d", false, "enable debug logging.(coming soon)")
 	rootCmd.PersistentFlags().BoolVar(&rc.IsHex, "hex", false, "print byte strings as hex encoded strings")
-	rootCmd.PersistentFlags().IntVar(&rc.PerCpuMapSize, "mapsize", 1024, "eBPF map size per CPU,for events buffer. default:1024 * PAGESIZE. (KB)")
+	rootCmd.PersistentFlags().IntVar(&rc.PerCpuMapSize, "mapsize", 2048, "eBPF map size per CPU,for events buffer. default:1024 * PAGESIZE. (KB)")
 	rootCmd.PersistentFlags().Uint64VarP(&rc.Pid, "pid", "p", defaultPid, "if pid is 0 then we target all pids")
 	rootCmd.PersistentFlags().Uint64VarP(&rc.Uid, "uid", "u", defaultUid, "if uid is 0 then we target all users")
 	rootCmd.PersistentFlags().StringVar(&rc.ContainerID, "containerID", "", "containerID")
@@ -85,6 +87,9 @@ func cacaptureCommandFunc(cmd *cobra.Command, args []string) {
 	var runModules = make(map[string]module.IModule)
 	var wg sync.WaitGroup
 
+	OrignalNsHandle, _ := netns.Get()
+	fmt.Println("OrignalNsHandle:", OrignalNsHandle)
+
 	nsHandle, err := netns.GetFromDocker(rc.ContainerID)
 	if err != nil {
 		logger.Printf("Container %s cann't find: %v", rc.ContainerID, err)
@@ -93,6 +98,7 @@ func cacaptureCommandFunc(cmd *cobra.Command, args []string) {
 	defer nsHandle.Close()
 
 	err = netns.Set(nsHandle)
+
 	if err != nil {
 		logger.Printf("Container %s namespace cann't set: %v", rc.ContainerID, err)
 		panic(err)
@@ -109,8 +115,9 @@ func cacaptureCommandFunc(cmd *cobra.Command, args []string) {
 		var conf config.IConfig
 		conf = rc
 		conf.SetPerCpuMapSize(rc.PerCpuMapSize)
-
+		conf.SetnsHandle(OrignalNsHandle)
 		err := mod.Init(ctx, logger, conf)
+
 		if err != nil {
 			logger.Printf("Module %s init failed: %v", mod.Name(), err)
 			continue

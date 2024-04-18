@@ -30,7 +30,7 @@ var PacketCount = 0
 
 var vxlanBufferPool = sync.Pool{
 	New: func() interface{} {
-		return make([]byte, VXLANHeaderSize+1500)
+		return make([]byte, VXLANHeaderSize+65536)
 	},
 }
 
@@ -127,6 +127,9 @@ func (t *MTCProbe) writePacket(dataLen uint32, timeStamp time.Time, packetBytes 
 }
 
 func (t *MTCProbe) sendPacket(dataLen uint32, timeStamp time.Time, packetBytes []byte) error {
+
+	// check the current ns
+
 	PacketCount++
 	vxlanHeader := VXLANHeader{
 		Flags: 0x8,
@@ -136,16 +139,17 @@ func (t *MTCProbe) sendPacket(dataLen uint32, timeStamp time.Time, packetBytes [
 	vxlanHeader.VNI[2] = byte(VNI_NUM & 0xFF)         // 获取VNI的低8位
 
 	buffer := vxlanBufferPool.Get().([]byte)
-	buffer[0] = 0x08 // Flags字段，设置VXLAN头的标志位，其中0x08表示VNI存在
+	actualBuffer := buffer[:VXLANHeaderSize+len(packetBytes)]
+	actualBuffer[0] = 0x08 // Flags字段，设置VXLAN头的标志位，其中0x08表示VNI存在
 	// 接下来的3个字节 (_ [3]byte) 默认为0，不需要操作
 
 	// 设置VNI字段
-	buffer[4] = byte((VNI_NUM >> 16) & 0xFF) // VNI的高8位
-	buffer[5] = byte((VNI_NUM >> 8) & 0xFF)  // VNI的中间8位
-	buffer[6] = byte(VNI_NUM & 0xFF)         // VNI的低8位
+	actualBuffer[4] = byte((VNI_NUM >> 16) & 0xFF) // VNI的高8位
+	actualBuffer[5] = byte((VNI_NUM >> 8) & 0xFF)  // VNI的中间8位
+	actualBuffer[6] = byte(VNI_NUM & 0xFF)
 
-	copy(buffer[VXLANHeaderSize:], packetBytes)
-	ethernetFrame := buffer
+	copy(actualBuffer[VXLANHeaderSize:], packetBytes)
+	ethernetFrame := actualBuffer
 
 	_, err := t.UDP_conn.Write(ethernetFrame)
 	if err != nil {

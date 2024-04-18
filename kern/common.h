@@ -57,6 +57,7 @@ const volatile u64 target_port = 5201;
 const volatile u64 target_pid = 0;
 const volatile u64 target_uid = 0;
 const volatile u64 target_errno = BASH_ERRNO_DEFAULT;
+static const volatile uint32_t target_ip = 0xAC100840; // 172.16.8.64 的网络字节序
 #else
 #endif
 

@@ -67,11 +67,11 @@ func (m *MContainerProbe) setupManagerPcap() error {
 	// 	BinaryPath:       binaryPath,
 	// 	UID:              "uprobe_ssl_master_key",
 	// })
-	probes = append(probes, &manager.Probe{
-		EbpfFuncName:     "tcp_sendmsg",
-		Section:          "kprobe/tcp_sendmsg",
-		AttachToFuncName: "tcp_sendmsg",
-	})
+	// probes = append(probes, &manager.Probe{
+	// 	EbpfFuncName:     "tcp_sendmsg",
+	// 	Section:          "kprobe/tcp_sendmsg",
+	// 	AttachToFuncName: "tcp_sendmsg",
+	// })
 	m.bpfManager = &manager.Manager{
 		Probes: probes,
 

@@ -4,6 +4,7 @@ import (
 	"os"
 
 	"github.com/gojue/ebpfmanager/kernel"
+	"github.com/vishvananda/netns"
 )
 
 type IConfig interface {
@@ -28,6 +29,9 @@ type IConfig interface {
 	GetDstIP() string
 	SetDstPort(int)
 	GetDstPort() int
+
+	SetnsHandle(netns.NsHandle)
+	GetnsHandle() netns.NsHandle
 }
 
 type eConfig struct {
@@ -40,6 +44,7 @@ type eConfig struct {
 	SentNet       bool
 	DstIP         string
 	DstPort       int
+	nsHandle      netns.NsHandle
 }
 
 func (c *eConfig) GetPid() uint64 {
@@ -118,4 +123,10 @@ func (c *eConfig) SetDstPort(port int) {
 }
 func (c *eConfig) GetDstPort() int {
 	return c.DstPort
+}
+func (c *eConfig) SetnsHandle(nsHandle netns.NsHandle) {
+	c.nsHandle = nsHandle
+}
+func (c *eConfig) GetnsHandle() netns.NsHandle {
+	return c.nsHandle
 }

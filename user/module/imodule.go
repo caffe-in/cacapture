@@ -4,6 +4,7 @@ import (
 	"cacapture/user/config"
 	"cacapture/user/event"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"log"
@@ -11,6 +12,13 @@ import (
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/perf"
 )
+
+// var dstAddr = &net.UDPAddr{
+// 	IP:   net.ParseIP("172.16.8.64").To4(),
+// 	Port: 4789,
+// }
+
+// var conn, _ = net.DialUDP("udp", nil, dstAddr)
 
 var Lost_samples_num = 0
 
@@ -84,6 +92,9 @@ func (m *Module) Run() error {
 	// go func() {
 	// 	m.processor.Serve()
 	// }()
+	// go func() {
+	// 	m.child.(*MContainerProbe).InitUPDConn()
+	// }()
 
 	err = m.readEvents()
 	if err != nil {
@@ -143,22 +154,23 @@ func (m *Module) perfEventReader(errChan chan error, em *ebpf.Map) {
 
 	// todo: multi-thread to process events
 
-	eventChan := make(chan []byte, 1000)
-	for i := 0; i < numWorkers; i++ {
-		go func() {
-			for rawEvent := range eventChan {
-				var e event.IEventStruct
-				e, err = m.child.Decode(em, rawEvent)
-				if err != nil {
-					m.logger.Printf("%s\tm.child.decode error:%v", m.child.Name(), err)
-					continue
-				}
-				m.Dispatcher(e)
-			}
-		}()
-	}
+	// eventChan := make(chan []byte, 1000)
+	// for i := 0; i < numWorkers; i++ {
+	// 	go func() {
+	// 		for rawEvent := range eventChan {
+	// 			var e event.IEventStruct
+	// 			e, err = m.child.Decode(em, rawEvent)
+	// 			if err != nil {
+	// 				m.logger.Printf("%s\tm.child.decode error:%v", m.child.Name(), err)
+	// 				continue
+	// 			}
+	// 			m.Dispatcher(e)
+	// 		}
+	// 	}()
+	// }
 
 	go func() {
+		// m.child.(*MContainerProbe).InitUPDConn()
 		for {
 			//判断ctx是不是结束
 			select {
@@ -183,18 +195,46 @@ func (m *Module) perfEventReader(errChan chan error, em *ebpf.Map) {
 				m.logger.Printf("%s\tperf event ring buffer full, dropped %d samples", m.child.Name(), record.LostSamples)
 				continue
 			}
-			if numWorkers < 1 {
+			if m.conf.GetSentNet() {
+				PacketCount++
+				rawSampleSize := binary.LittleEndian.Uint32(record.RawSample[28:32])
+				vxlanHeader := VXLANHeader{
+					Flags: 0x8,
+				}
+				vxlanHeader.VNI[0] = byte((VNI_NUM >> 16) & 0xFF) // 获取VNI的高8位
+				vxlanHeader.VNI[1] = byte((VNI_NUM >> 8) & 0xFF)  // 获取VNI的中间8位
+				vxlanHeader.VNI[2] = byte(VNI_NUM & 0xFF)         // 获取VNI的低8位
+
+				buffer := vxlanBufferPool.Get().([]byte)
+				actualBuffer := buffer[:VXLANHeaderSize+rawSampleSize]
+				actualBuffer[0] = 0x08 // Flags字段，设置VXLAN头的标志位，其中0x08表示VNI存在
+				// 接下来的3个字节 (_ [3]byte) 默认为0，不需要操作
+
+				// 设置VNI字段
+				actualBuffer[4] = byte((VNI_NUM >> 16) & 0xFF) // VNI的高8位
+				actualBuffer[5] = byte((VNI_NUM >> 8) & 0xFF)  // VNI的中间8位
+				actualBuffer[6] = byte(VNI_NUM & 0xFF)         // VNI的低8位
+
+				copy(actualBuffer[VXLANHeaderSize:], record.RawSample[36:36+rawSampleSize])
+				ethernetFrame := actualBuffer
+				// // m.logger.Printf("send packet to UDP, the size of payload is: %d", len(ethernetFrame))
+				_, err := m.child.(*MContainerProbe).MTCProbe.UDP_conn.Write(ethernetFrame)
+				// conn.Write(ethernetFrame)
+				vxlanBufferPool.Put(buffer)
+				if err != nil {
+					log.Println("Write to UDP failed: ", err, "the size of packetBytes is: ", len(ethernetFrame))
+
+					return
+				}
+			} else {
 				var e event.IEventStruct
 				e, err = m.child.Decode(em, record.RawSample)
 				if err != nil {
 					m.logger.Printf("%s\tm.child.decode error:%v", m.child.Name(), err)
 					continue
 				}
-				// PacketCount++
-				// 上报数据
 				m.Dispatcher(e)
-			} else {
-				eventChan <- record.RawSample
+
 			}
 
 		}

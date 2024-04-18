@@ -89,8 +89,11 @@ func (m *MContainerProbe) Init(ctx context.Context, logger *log.Logger, conf con
 	m.tcPackets = make([]*TcPacket, 0, 1024)
 	m.tcPacketLocker = &sync.Mutex{}
 	m.masterKeyBuffer = bytes.NewBuffer([]byte{})
-
+	// go func() {
+	// 	m.InitUPDConn()
+	// }()
 	m.InitUPDConn()
+
 	return nil
 
 }
@@ -244,6 +247,9 @@ func (m *MContainerProbe) DecodeFun(em *ebpf.Map) (event.IEventStruct, bool) {
 	return fun, found
 }
 func (m *MContainerProbe) InitUPDConn() error {
+	// netns.Set(m.conf.GetnsHandle())
+	// currNs, _ := netns.Get()
+	// fmt.Println("currNs:", currNs)
 	// change the m.conf.GetDstIP() to byte,byte,byte,byte
 	dstAddr := &net.UDPAddr{
 		IP:   net.ParseIP(m.conf.GetDstIP()).To4(),
