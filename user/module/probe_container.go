@@ -109,6 +109,7 @@ func (m *MContainerProbe) start() error {
 	m.logger.Printf("%s\tPcapng MODEL\n", m.Name())
 	err = m.setupManagerPcap()
 	if err != nil {
+		m.logger.Println("set up fail")
 		return err
 
 	}

@@ -14,7 +14,7 @@
             "console": "integratedTerminal",          
             "program": "main.go",
             "args": [
-             "--containerID", "9659b0ad9aea",
+             "--containerID", "845514e76536",
              "--ifname","eth0",
              "--PcapFile","test.pcapng",
              "--sentnet"

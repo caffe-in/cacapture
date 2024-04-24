@@ -10,6 +10,7 @@ import (
 
 	"github.com/cilium/ebpf"
 	manager "github.com/gojue/ebpfmanager"
+	"github.com/vishvananda/netns"
 	"golang.org/x/sys/unix"
 )
 
@@ -21,29 +22,37 @@ func (m *MContainerProbe) setupManagerPcap() error {
 
 	var probes []*manager.Probe
 
-	interf, err := net.InterfaceByName(m.ifName)
-	if err != nil {
-		return err
-	}
+	// interf, err := net.InterfaceByName(m.ifName)
+	// if err != nil {
+	// 	return err
+	// }
 
-	isNetIfaceLo := interf.Flags&net.FlagLoopback == net.FlagLoopback
+	// isNetIfaceLo := interf.Flags&net.FlagLoopback == net.FlagLoopback
 
-	skipLoopback := true
-	if isNetIfaceLo && skipLoopback {
-		return fmt.Errorf("%s\t%s is a loopback interface, skip it", m.Name(), m.ifName)
-	}
-	m.ifIdex = interf.Index
+	// skipLoopback := true
+	// if isNetIfaceLo && skipLoopback {
+	// 	return fmt.Errorf("%s\t%s is a loopback interface, skip it", m.Name(), m.ifName)
+	// }
+	nsHandle, err := netns.GetFromDocker("0f550e104309")
+	fmt.Println("the nsHandle is", nsHandle)
+	m.ifIdex = 28
+
+	// 打开网络命名空间文件
 
 	probes = append(probes, &manager.Probe{
 		Section:          "classifier/egress",
 		EbpfFuncName:     "egress_cls_func",
 		Ifname:           m.ifName,
+		Ifindex:          int32(m.ifIdex),
+		IfindexNetns:     uint64(nsHandle),
 		NetworkDirection: manager.Egress,
 	})
 	probes = append(probes, &manager.Probe{
 		Section:          "classifier/ingress",
 		EbpfFuncName:     "ingress_cls_func",
 		Ifname:           m.ifName,
+		Ifindex:          int32(m.ifIdex),
+		IfindexNetns:     uint64(nsHandle),
 		NetworkDirection: manager.Ingress,
 	})
 	// binaryPath = m.conf.(*config.ContainerConfig).Openssl

@@ -8,7 +8,6 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"runtime"
 	"sync"
 	"syscall"
 
@@ -66,8 +65,8 @@ func cacaptureCommandFunc(cmd *cobra.Command, args []string) {
 		log.Println(http.ListenAndServe(":6060", nil))
 	}()
 
-	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()
+	// runtime.LockOSThread()
+	// defer runtime.UnlockOSThread()
 	stopper := make(chan os.Signal, 1)
 	signal.Notify(stopper, os.Interrupt, syscall.SIGTERM)
 	ctx, cancelFun := context.WithCancel(context.Background())
@@ -90,19 +89,19 @@ func cacaptureCommandFunc(cmd *cobra.Command, args []string) {
 	OrignalNsHandle, _ := netns.Get()
 	fmt.Println("OrignalNsHandle:", OrignalNsHandle)
 
-	nsHandle, err := netns.GetFromDocker(rc.ContainerID)
-	if err != nil {
-		logger.Printf("Container %s cann't find: %v", rc.ContainerID, err)
-		panic(err)
-	}
-	defer nsHandle.Close()
+	// nsHandle, err := netns.GetFromDocker(rc.ContainerID)
+	// if err != nil {
+	// 	logger.Printf("Container %s cann't find: %v", rc.ContainerID, err)
+	// 	panic(err)
+	// }
+	// defer nsHandle.Close()
 
-	err = netns.Set(nsHandle)
+	// err = netns.Set(nsHandle)
 
-	if err != nil {
-		logger.Printf("Container %s namespace cann't set: %v", rc.ContainerID, err)
-		panic(err)
-	}
+	// if err != nil {
+	// 	logger.Printf("Container %s namespace cann't set: %v", rc.ContainerID, err)
+	// 	panic(err)
+	// }
 
 	for _, modName := range modNames {
 		mod := module.GetModuleByName(modName)
@@ -115,7 +114,6 @@ func cacaptureCommandFunc(cmd *cobra.Command, args []string) {
 		var conf config.IConfig
 		conf = rc
 		conf.SetPerCpuMapSize(rc.PerCpuMapSize)
-		conf.SetnsHandle(OrignalNsHandle)
 		err := mod.Init(ctx, logger, conf)
 
 		if err != nil {
