@@ -10,7 +10,6 @@ import (
 
 	"github.com/cilium/ebpf"
 	manager "github.com/gojue/ebpfmanager"
-	"github.com/vishvananda/netns"
 	"golang.org/x/sys/unix"
 )
 
@@ -22,37 +21,63 @@ func (m *MContainerProbe) setupManagerPcap() error {
 
 	var probes []*manager.Probe
 
-	// interf, err := net.InterfaceByName(m.ifName)
+	// nsPath := fmt.Sprintf("/proc/%s/ns/net", strconv.Itoa(int(m.conf.GetContainerPID())))
+	// nsHandle, err := netns.GetFromPath(nsPath)
+	// fmt.Println("the nsHandle is", nsHandle)
+
+	// originalNs, err := netns.Get()
 	// if err != nil {
-	// 	return err
+	// 	m.logger.Println("cann't change get the orignalNs")
 	// }
-
-	// isNetIfaceLo := interf.Flags&net.FlagLoopback == net.FlagLoopback
-
-	// skipLoopback := true
-	// if isNetIfaceLo && skipLoopback {
-	// 	return fmt.Errorf("%s\t%s is a loopback interface, skip it", m.Name(), m.ifName)
+	// defer originalNs.Close()
+	// if err := netns.Set(nsHandle); err != nil {
+	// 	m.logger.Println("Error setting namespace:", err)
 	// }
-	nsHandle, err := netns.GetFromDocker("0f550e104309")
-	fmt.Println("the nsHandle is", nsHandle)
-	m.ifIdex = 28
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		fmt.Println("Error getting interfaces:", err)
+	}
+
+	var MonitorInterf net.Interface
+	// 输出每个接口的索引
+	for _, interf := range ifaces {
+		isNetIfaceLo := interf.Flags&net.FlagLoopback == net.FlagLoopback
+
+		skipLoopback := true
+		if isNetIfaceLo && skipLoopback {
+			// return fmt.Errorf("%s\t%s is a loopback interface, skip it", m.Name(), m.ifName)
+			continue
+		} else {
+			// 假设第一个不为LO的网卡就是我们的检测对象
+			// 会在支撑多pod检测后更新
+			MonitorInterf = interf
+			break
+		}
+
+	}
+	m.ifIdex = MonitorInterf.Index
+
+	// 手动恢复原始网络命名空间
+	// if err := netns.Set(originalNs); err != nil {
+	// 	fmt.Println("Error restoring original namespace:", err)
+	// }
 
 	// 打开网络命名空间文件
 
 	probes = append(probes, &manager.Probe{
-		Section:          "classifier/egress",
-		EbpfFuncName:     "egress_cls_func",
-		Ifname:           m.ifName,
-		Ifindex:          int32(m.ifIdex),
-		IfindexNetns:     uint64(nsHandle),
+		Section:      "classifier/egress",
+		EbpfFuncName: "egress_cls_func",
+		Ifname:       m.ifName,
+		Ifindex:      int32(m.ifIdex),
+		// IfindexNetns:     uint64(nsHandle),
 		NetworkDirection: manager.Egress,
 	})
 	probes = append(probes, &manager.Probe{
-		Section:          "classifier/ingress",
-		EbpfFuncName:     "ingress_cls_func",
-		Ifname:           m.ifName,
-		Ifindex:          int32(m.ifIdex),
-		IfindexNetns:     uint64(nsHandle),
+		Section:      "classifier/ingress",
+		EbpfFuncName: "ingress_cls_func",
+		Ifname:       m.ifName,
+		Ifindex:      int32(m.ifIdex),
+		// IfindexNetns:     uint64(nsHandle),
 		NetworkDirection: manager.Ingress,
 	})
 	// binaryPath = m.conf.(*config.ContainerConfig).Openssl

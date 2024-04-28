@@ -5,9 +5,9 @@ type ContainerConfig struct {
 	//Curlpath   string `json:"curlPath"` //curl的文件路径
 	Openssl     string `json:"openssl"`
 	Pthread     string `json:"pThread"`     // /lib/x86_64-linux-gnu/libpthread.so.0
-	Model       string `json:"model"`       // eCapture Openssl capture model. text:pcap:keylog
+	Model       string `json:"model"`       // CACAPTURE Openssl capture model. text:pcap:keylog
 	PcapFile    string `json:"pcapFile"`    // pcapFile  the  raw  packets  to file rather than parsing and printing them out.
-	KeylogFile  string `json:"keylog"`      // Keylog  The file stores SSL/TLS keys, and eCapture captures these keys during encrypted traffic communication and saves them to the file.
+	KeylogFile  string `json:"keylog"`      // Keylog  The file stores SSL/TLS keys, and CACAPTURE captures these keys during encrypted traffic communication and saves them to the file.
 	Ifname      string `json:"ifName"`      // (TC Classifier) Interface name on which the probe will be attached.
 	ContainerID string `json:"containerID"` // containerID
 	Port        uint16 `json:"port"`        // capture port

@@ -37,10 +37,11 @@ func init() {
 	log.Println("hello")
 	rootCmd.PersistentFlags().BoolVarP(&rc.Debug, "debug", "d", false, "enable debug logging.(coming soon)")
 	rootCmd.PersistentFlags().BoolVar(&rc.IsHex, "hex", false, "print byte strings as hex encoded strings")
-	rootCmd.PersistentFlags().IntVar(&rc.PerCpuMapSize, "mapsize", 2048, "eBPF map size per CPU,for events buffer. default:1024 * PAGESIZE. (KB)")
+	rootCmd.PersistentFlags().IntVar(&rc.PerCpuMapSize, "mapsize", 1024, "eBPF map size per CPU,for events buffer. default:1024 * PAGESIZE. (KB)")
 	rootCmd.PersistentFlags().Uint64VarP(&rc.Pid, "pid", "p", defaultPid, "if pid is 0 then we target all pids")
 	rootCmd.PersistentFlags().Uint64VarP(&rc.Uid, "uid", "u", defaultUid, "if uid is 0 then we target all users")
 	rootCmd.PersistentFlags().StringVar(&rc.ContainerID, "containerID", "", "containerID")
+	rootCmd.PersistentFlags().UintVar(&rc.ContainerPID, "containerPID", 0, "the pid which container runing")
 	rootCmd.PersistentFlags().StringVar(&rc.Ifname, "ifname", "", "ifname")
 	rootCmd.PersistentFlags().StringVar(&rc.PcapFile, "PcapFile", "", "pcapngFilename")
 	rootCmd.PersistentFlags().BoolVar(&rc.SentNet, "sentnet", false, "sent_net")
@@ -134,10 +135,10 @@ func cacaptureCommandFunc(cmd *cobra.Command, args []string) {
 	}
 
 	if runMods > 0 {
-		logger.Printf("ECAPTURE :: \tstart %d modules", runMods)
+		logger.Printf("CACAPTURE :: \tstart %d modules", runMods)
 		<-stopper
 	} else {
-		logger.Println("ECAPTURE :: \tNo runnable modules, Exit(1)")
+		logger.Println("CACAPTURE :: \tNo runnable modules, Exit(1)")
 		os.Exit(1)
 	}
 	cancelFun()

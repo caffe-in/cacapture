@@ -224,7 +224,7 @@ func (m *MContainerProbe) Close() error {
 		}
 		PacketCount += i
 		if PacketCount == 0 {
-			m.logger.Printf("nothing captured, please check your network interface, see \"ecapture tls -h\" for more information.")
+			m.logger.Printf("nothing captured, please check your network interface, see \"CACAPTURE tls -h\" for more information.")
 		} else {
 
 			m.logger.Printf("%s\t save %d packets into pcapng file.\n", m.Name(), PacketCount)

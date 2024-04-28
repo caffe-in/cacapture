@@ -14,8 +14,8 @@
 
 #include "vmlinux.h"
 #include "bpf/bpf_helpers.h"
-#ifndef ECAPTURE_COMMON_H
-#define ECAPTURE_COMMON_H
+#ifndef CACAPTURE_COMMON_H
+#define CACAPTURE_COMMON_H
 
 #ifdef DEBUG_PRINT
 #define debug_bpf_printk(fmt, ...)                     \
@@ -48,7 +48,7 @@
 #define ETH_P_IP 0x0800 /* Internet Protocol packet        */
 #define SKB_MAX_DATA_SIZE 2048
 
-// .rodata section bug via : https://github.com/gojue/ecapture/issues/39
+// .rodata section bug via : https://github.com/gojue/CACAPTURE/issues/39
 #ifndef KERNEL_LESS_5_2
 // alawyse, we used it in tc.h
 const volatile u64 target_port = 5201;

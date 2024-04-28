@@ -32,12 +32,15 @@ type IConfig interface {
 
 	SetnsHandle(netns.NsHandle)
 	GetnsHandle() netns.NsHandle
+
+	SetContainerPID(uint)
+	GetContainerPID() uint
 }
 
 type eConfig struct {
 	Pid           uint64
 	Uid           uint64
-	PerCpuMapSize int // ebpf map size for per Cpu.   see https://github.com/gojue/ecapture/issues/433 .
+	PerCpuMapSize int // ebpf map size for per Cpu.   see https://github.com/gojue/CACAPTURE/issues/433 .
 	IsHex         bool
 	Debug         bool
 	Port          uint16
@@ -45,6 +48,7 @@ type eConfig struct {
 	DstIP         string
 	DstPort       int
 	nsHandle      netns.NsHandle
+	ContainerPID  uint
 }
 
 func (c *eConfig) GetPid() uint64 {
@@ -129,4 +133,11 @@ func (c *eConfig) SetnsHandle(nsHandle netns.NsHandle) {
 }
 func (c *eConfig) GetnsHandle() netns.NsHandle {
 	return c.nsHandle
+}
+
+func (c *eConfig) SetContainerPID(cid uint) {
+	c.ContainerPID = cid
+}
+func (c *eConfig) GetContainerPID() uint {
+	return c.ContainerPID
 }

@@ -20,7 +20,7 @@ import (
 	"github.com/google/gopacket/pcapgo"
 )
 
-const EcaptureMagic = 0xCC0C4CFC
+const CACAPTUREMagic = 0xCC0C4CFC
 
 const BufferPacketNum = 4000
 
@@ -103,7 +103,7 @@ func (t *MTCProbe) writePacket(dataLen uint32, timeStamp time.Time, packetBytes 
 
 		// set 0 default, Because the monitored network interface is the first one written into the pcapng header.
 		// 设置为0，因为被监听的网卡是第一个写入pcapng header中的。
-		// via : https://github.com/gojue/ecapture/issues/347
+		// via : https://github.com/gojue/CACAPTURE/issues/347
 		InterfaceIndex: 0,
 	}
 
@@ -207,7 +207,7 @@ func (t *MTCProbe) writePid(tcEvent *event.TcSkbEvent) (error, []byte) {
 		remainder = append(remainder, layer.LayerContents()...)
 	}
 	metadata := packetMetaData{}
-	metadata.Magic = EcaptureMagic
+	metadata.Magic = CACAPTUREMagic
 	metadata.Pid = tcEvent.Pid
 	var cmd = strings.TrimSpace(fmt.Sprintf("%s", tcEvent.Comm))
 	metadata.CmdLen = uint8(len(cmd))
@@ -261,19 +261,19 @@ func (t *MTCProbe) createPcapng(netIfs []net.Interface) error {
 		return fmt.Errorf("error creating pcap file: %v", err)
 	}
 
-	// TODO : write Application "ecapture.lua" to decode PID/Comm info.
+	// TODO : write Application "CACAPTURE.lua" to decode PID/Comm info.
 	pcapOption := pcapgo.NgWriterOptions{
 		SectionInfo: pcapgo.NgSectionInfo{
-			Hardware:    "eCapture (旁观者) Hardware",
+			Hardware:    "CACAPTURE (旁观者) Hardware",
 			OS:          "Linux/Android",
-			Application: "ecapture.lua",
-			Comment:     "see https://ecapture.cc for more information. CFC4N <cfc4n.cs@gmail.com>",
+			Application: "CACAPTURE.lua",
+			Comment:     "see https://CACAPTURE.cc for more information. CFC4N <cfc4n.cs@gmail.com>",
 		},
 	}
 	// write interface description
 	ngIface := pcapgo.NgInterface{
 		Name:       t.ifName,
-		Comment:    "eCapture (旁观者): github.com/gojue/ecapture",
+		Comment:    "CACAPTURE (旁观者): github.com/gojue/CACAPTURE",
 		Filter:     "",
 		LinkType:   layers.LinkTypeEthernet,
 		SnapLength: uint32(math.MaxUint16),
@@ -288,7 +288,7 @@ func (t *MTCProbe) createPcapng(netIfs []net.Interface) error {
 	for _, iface := range netIfs {
 		ngIface = pcapgo.NgInterface{
 			Name:       iface.Name,
-			Comment:    "eCapture (旁观者): github.com/gojue/ecapture",
+			Comment:    "CACAPTURE (旁观者): github.com/gojue/CACAPTURE",
 			Filter:     "",
 			LinkType:   layers.LinkTypeEthernet,
 			SnapLength: uint32(math.MaxUint16),

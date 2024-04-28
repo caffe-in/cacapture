@@ -78,7 +78,7 @@ func (m *Module) SetChild(module IModule) {
 }
 
 func (m *Module) Run() error {
-	m.logger.Printf("ECAPTURE ::\tModule.Run()")
+	m.logger.Printf("CACAPTURE ::\tModule.Run()")
 	//  start
 	err := m.child.Start()
 	if err != nil {
