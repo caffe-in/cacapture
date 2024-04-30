@@ -1,3 +1,4 @@
 *.pcapng
 *.data
 *.data.old
+capture_msg/
