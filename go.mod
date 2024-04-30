@@ -6,14 +6,15 @@ require (
 	github.com/cilium/ebpf v0.12.3
 	github.com/gojue/ebpfmanager v0.4.4
 	github.com/vishvananda/netns v0.0.4
-	golang.org/x/sys v0.14.1-0.20231108175955-e4099bfacb8c
+	golang.org/x/sys v0.17.0
 )
 
 require (
 	github.com/a-urth/go-bindata v0.0.0-20180209162145-df38da164efc // indirect
 	github.com/avast/retry-go v3.0.0+incompatible // indirect
 	github.com/florianl/go-tc v0.4.0 // indirect
-	github.com/google/go-cmp v0.5.9 // indirect
+	github.com/gogo/protobuf v1.3.2 // indirect
+	github.com/google/go-cmp v0.6.0 // indirect
 	github.com/google/gopacket v1.1.19 // indirect
 	github.com/hashicorp/errwrap v1.0.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
@@ -27,5 +28,10 @@ require (
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/vishvananda/netlink v1.1.0 // indirect
 	golang.org/x/exp v0.0.0-20230224173230-c95f2b4c22f2 // indirect
-	golang.org/x/net v0.0.0-20210610124326-52da8fb2a613 // indirect
+	golang.org/x/net v0.21.0 // indirect
+	golang.org/x/text v0.14.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20240227224415-6ceb2ff114de // indirect
+	google.golang.org/grpc v1.63.2 // indirect
+	google.golang.org/protobuf v1.33.0 // indirect
+	k8s.io/cri-api v0.25.16 // indirect
 )

@@ -14,10 +14,12 @@
             "console": "integratedTerminal",          
             "program": "main.go",
             "args": [
-             "--containerPID", "4876",
+
+            "--PodName","all",
+            //  "--containerPID", "4876",
              "--ifname","eth0",
-             "--PcapFile","test.pcapng",
-             "--sentnet"
+             "--PcapFile","./capture_msg/test.pcapng",
+            //  "--sentnet"
             ],
          }
     ]

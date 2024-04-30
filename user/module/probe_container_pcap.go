@@ -3,15 +3,28 @@ package module
 import (
 	"cacapture/user/config"
 	"cacapture/user/event"
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"net"
+	"time"
 
 	"github.com/cilium/ebpf"
 	manager "github.com/gojue/ebpfmanager"
+	"github.com/vishvananda/netns"
 	"golang.org/x/sys/unix"
+	"google.golang.org/grpc"
+	runtimeapi "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
 )
+
+type PodNetworkInfo struct {
+	Podname  string
+	Ifname   string
+	Ifindex  int
+	NsHandel netns.NsHandle
+}
 
 func (m *MContainerProbe) setupManagerPcap() error {
 	var ifname string // binaryPath
@@ -20,66 +33,131 @@ func (m *MContainerProbe) setupManagerPcap() error {
 	m.ifName = ifname
 
 	var probes []*manager.Probe
+	var podNetworksMap map[string]*PodNetworkInfo = make(map[string]*PodNetworkInfo)
 
-	// nsPath := fmt.Sprintf("/proc/%s/ns/net", strconv.Itoa(int(m.conf.GetContainerPID())))
-	// nsHandle, err := netns.GetFromPath(nsPath)
-	// fmt.Println("the nsHandle is", nsHandle)
+	var podNameList = m.conf.GetPodName()
+	m.logger.Println("CACAPTURE::\t pod name list is", podNameList)
 
-	// originalNs, err := netns.Get()
-	// if err != nil {
-	// 	m.logger.Println("cann't change get the orignalNs")
-	// }
-	// defer originalNs.Close()
-	// if err := netns.Set(nsHandle); err != nil {
-	// 	m.logger.Println("Error setting namespace:", err)
-	// }
-	ifaces, err := net.Interfaces()
-	if err != nil {
-		fmt.Println("Error getting interfaces:", err)
+	if m.conf.GetContainerPID() == 0 && len(podNameList) != 0 {
+		// don't set the pid for the any container in pod, but give the pod name
+		// search the first net device which is not the lo
+
+		conn, err := grpc.Dial("unix:///run/containerd/containerd.sock", grpc.WithInsecure(), grpc.WithBlock())
+		if err != nil {
+			panic("failed to connect: " + err.Error())
+		}
+		defer conn.Close()
+
+		runtimeService := runtimeapi.NewRuntimeServiceClient(conn)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		// 获取容器列表
+		containers, err := runtimeService.ListContainers(ctx, &runtimeapi.ListContainersRequest{})
+		if err != nil {
+			panic("failed to list containers: " + err.Error())
+		}
+
+		for _, container := range containers.Containers {
+			// fmt.Printf("Container ID: %s\n", container.Id)
+			// 可以进一步获取容器状态或执行其他操作
+			status, err := runtimeService.ContainerStatus(ctx, &runtimeapi.ContainerStatusRequest{ContainerId: container.Id, Verbose: true})
+			if err != nil {
+				m.logger.Printf("Error getting status for container %s: %s\n", container.Id, err)
+				continue
+			}
+			if status.Status.State != runtimeapi.ContainerState_CONTAINER_RUNNING {
+				continue
+			}
+			podNs := status.Status.Labels["io.kubernetes.pod.namespace"]
+			if podNs == "kube-system" {
+				continue
+			}
+			podName := status.Status.Labels["io.kubernetes.pod.name"]
+			// 确保每个pod只有一个interface被抓取
+
+			if _, exists := podNetworksMap[podName]; exists {
+
+				continue
+			}
+
+			pid, err := getPid(status)
+			fmt.Println(podNameList)
+			// fmt.Println("the pid is", pid)
+			if err != nil {
+				m.logger.Println("Cann't get the pid from container%v", container.Id, err)
+			}
+			if contains(podNameList, "all") {
+				addPodNetworkInfo(pid, podName, podNetworksMap)
+			} else if contains(podNameList, podName) {
+
+				addPodNetworkInfo(pid, podName, podNetworksMap)
+			} else {
+				fmt.Println(podName)
+				continue
+			}
+
+		}
+
+	} else {
+		addPodNetworkInfo(int(m.conf.GetContainerPID()), "", podNetworksMap)
 	}
+	m.logger.Println("CACAPTURE::\tgive the pod infomation as follows")
+	for _, podInfo := range podNetworksMap {
+		m.logger.Printf("CACAPTURE::\tthe pod name is %s,the iface name is %s,the iface index is %v, the ns is %s\n", podInfo.Podname, podInfo.Ifname, podInfo.Ifindex, podInfo.NsHandel.String())
+	}
+	if len(podNetworksMap) == 1 {
+		m.logger.Println("only have one pod")
+		for _, podInfo := range podNetworksMap {
+			probes = append(probes, &manager.Probe{
+				Section:          "classifier/egress",
+				EbpfFuncName:     "egress_cls_func",
+				Ifname:           podInfo.Ifname,
+				Ifindex:          int32(podInfo.Ifindex),
+				IfindexNetns:     uint64(podInfo.NsHandel),
+				NetworkDirection: manager.Egress,
+			})
+			probes = append(probes, &manager.Probe{
+				Section:          "classifier/ingress",
+				EbpfFuncName:     "ingress_cls_func",
+				Ifname:           podInfo.Ifname,
+				Ifindex:          int32(podInfo.Ifindex),
+				IfindexNetns:     uint64(podInfo.NsHandel),
+				NetworkDirection: manager.Ingress,
+			})
 
-	var MonitorInterf net.Interface
-	// 输出每个接口的索引
-	for _, interf := range ifaces {
-		isNetIfaceLo := interf.Flags&net.FlagLoopback == net.FlagLoopback
+		}
 
-		skipLoopback := true
-		if isNetIfaceLo && skipLoopback {
-			// return fmt.Errorf("%s\t%s is a loopback interface, skip it", m.Name(), m.ifName)
-			continue
-		} else {
-			// 假设第一个不为LO的网卡就是我们的检测对象
-			// 会在支撑多pod检测后更新
-			MonitorInterf = interf
-			break
+	} else {
+
+		for _, podInfo := range podNetworksMap {
+			newEgressProbe := &manager.Probe{
+				Section:          "classifier/egress",
+				EbpfFuncName:     "egress_cls_func",
+				NetworkDirection: manager.Egress,
+				UID:              podInfo.Ifname + podInfo.NsHandel.String(),
+				Ifname:           podInfo.Ifname,
+				Ifindex:          int32(podInfo.Ifindex),
+				IfindexNetns:     uint64(podInfo.NsHandel),
+			}
+
+			// 创建新的 ingressProbe 实例
+			newIngressProbe := &manager.Probe{
+				Section:          "classifier/ingress",
+				EbpfFuncName:     "ingress_cls_func",
+				NetworkDirection: manager.Ingress,
+				UID:              podInfo.Ifname + podInfo.NsHandel.String(),
+				Ifname:           podInfo.Ifname,
+				Ifindex:          int32(podInfo.Ifindex),
+				IfindexNetns:     uint64(podInfo.NsHandel),
+			}
+
+			probes = append(probes, newEgressProbe, newIngressProbe)
+
 		}
 
 	}
-	m.ifIdex = MonitorInterf.Index
 
-	// 手动恢复原始网络命名空间
-	// if err := netns.Set(originalNs); err != nil {
-	// 	fmt.Println("Error restoring original namespace:", err)
-	// }
-
-	// 打开网络命名空间文件
-
-	probes = append(probes, &manager.Probe{
-		Section:      "classifier/egress",
-		EbpfFuncName: "egress_cls_func",
-		Ifname:       m.ifName,
-		Ifindex:      int32(m.ifIdex),
-		// IfindexNetns:     uint64(nsHandle),
-		NetworkDirection: manager.Egress,
-	})
-	probes = append(probes, &manager.Probe{
-		Section:      "classifier/ingress",
-		EbpfFuncName: "ingress_cls_func",
-		Ifname:       m.ifName,
-		Ifindex:      int32(m.ifIdex),
-		// IfindexNetns:     uint64(nsHandle),
-		NetworkDirection: manager.Ingress,
-	})
 	// binaryPath = m.conf.(*config.ContainerConfig).Openssl
 	m.sslBpfFile = "tc.o" // assinged by caffein
 	// m.logger.Printf("%s\tHOOK type:%d, binrayPath:%s\n", m.Name(), m.conf.(*config.ContainerConfig).ElfType, binaryPath)
@@ -94,18 +172,7 @@ func (m *MContainerProbe) setupManagerPcap() error {
 	if err != nil {
 		return err
 	}
-	// probes = append(probes, &manager.Probe{
-	// 	Section:          "uprobe/SSL_write_key",
-	// 	EbpfFuncName:     "probe_ssl_master_key",
-	// 	AttachToFuncName: m.masterHookFunc, // SSL_do_handshake or SSL_write
-	// 	BinaryPath:       binaryPath,
-	// 	UID:              "uprobe_ssl_master_key",
-	// })
-	// probes = append(probes, &manager.Probe{
-	// 	EbpfFuncName:     "tcp_sendmsg",
-	// 	Section:          "kprobe/tcp_sendmsg",
-	// 	AttachToFuncName: "tcp_sendmsg",
-	// })
+
 	m.bpfManager = &manager.Manager{
 		Probes: probes,
 
@@ -171,4 +238,60 @@ func (m *MContainerProbe) initDecodeFunPcap() error {
 	// //masterkeyEvent.SetModule(m)
 	// m.eventFuncMaps[MasterkeyEventsMap] = masterkeyEvent
 	return nil
+}
+
+func getPid(status *runtimeapi.ContainerStatusResponse) (int, error) {
+	infoJSON, ok := status.Info["info"]
+	if !ok {
+		return -1, errors.New("info key does not exist in the status map")
+	}
+	var info map[string]interface{}
+	err := json.Unmarshal([]byte(infoJSON), &info)
+	if err != nil {
+		return -1, err
+	}
+	// 访问嵌套字段
+	pidValue, ok := info["pid"]
+	if !ok {
+		return -1, errors.New("pid key is missing in info")
+	}
+	return int(pidValue.(float64)), nil
+
+}
+func addPodNetworkInfo(pid int, podName string, podNetworksMap map[string]*PodNetworkInfo) error {
+	originalNs, _ := netns.Get()
+	defer netns.Set(originalNs)
+	nsPath := fmt.Sprintf("/proc/%d/ns/net", pid)
+	nsHandle, err := netns.GetFromPath(nsPath)
+	if err != nil {
+		return err
+	}
+
+	netns.Set(nsHandle)
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return err
+	}
+	var selectedInterface net.Interface
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagLoopback != net.FlagLoopback {
+			selectedInterface = iface
+			break
+		}
+	}
+	podNetworksMap[podName] = &PodNetworkInfo{
+		Podname:  podName,
+		Ifname:   selectedInterface.Name,
+		Ifindex:  selectedInterface.Index,
+		NsHandel: nsHandle,
+	}
+	return nil
+}
+func contains(s []string, str string) bool {
+	for _, v := range s {
+		if v == str {
+			return true
+		}
+	}
+	return false
 }

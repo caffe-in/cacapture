@@ -4,7 +4,6 @@ import (
 	"cacapture/user/config"
 	"cacapture/user/module"
 	"context"
-	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -42,6 +41,7 @@ func init() {
 	rootCmd.PersistentFlags().Uint64VarP(&rc.Uid, "uid", "u", defaultUid, "if uid is 0 then we target all users")
 	rootCmd.PersistentFlags().StringVar(&rc.ContainerID, "containerID", "", "containerID")
 	rootCmd.PersistentFlags().UintVar(&rc.ContainerPID, "containerPID", 0, "the pid which container runing")
+	rootCmd.PersistentFlags().StringSliceVar(&rc.PodName, "PodName", []string{}, "the pod's name or pod lists name which we will monitor")
 	rootCmd.PersistentFlags().StringVar(&rc.Ifname, "ifname", "", "ifname")
 	rootCmd.PersistentFlags().StringVar(&rc.PcapFile, "PcapFile", "", "pcapngFilename")
 	rootCmd.PersistentFlags().BoolVar(&rc.SentNet, "sentnet", false, "sent_net")
@@ -86,9 +86,6 @@ func cacaptureCommandFunc(cmd *cobra.Command, args []string) {
 	var runMods uint8
 	var runModules = make(map[string]module.IModule)
 	var wg sync.WaitGroup
-
-	OrignalNsHandle, _ := netns.Get()
-	fmt.Println("OrignalNsHandle:", OrignalNsHandle)
 
 	// nsHandle, err := netns.GetFromDocker(rc.ContainerID)
 	// if err != nil {

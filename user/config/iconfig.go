@@ -35,6 +35,9 @@ type IConfig interface {
 
 	SetContainerPID(uint)
 	GetContainerPID() uint
+
+	SetPodName(string)
+	GetPodName() []string
 }
 
 type eConfig struct {
@@ -49,6 +52,7 @@ type eConfig struct {
 	DstPort       int
 	nsHandle      netns.NsHandle
 	ContainerPID  uint
+	PodName       []string
 }
 
 func (c *eConfig) GetPid() uint64 {
@@ -140,4 +144,11 @@ func (c *eConfig) SetContainerPID(cid uint) {
 }
 func (c *eConfig) GetContainerPID() uint {
 	return c.ContainerPID
+}
+
+func (c *eConfig) SetPodName(podname string) {
+	c.PodName = []string{podname}
+}
+func (c *eConfig) GetPodName() []string {
+	return c.PodName
 }
