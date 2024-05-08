@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/cilium/ebpf"
+	"github.com/docker/docker/client"
 	manager "github.com/gojue/ebpfmanager"
 	"github.com/vishvananda/netns"
 	"golang.org/x/sys/unix"
@@ -45,9 +46,8 @@ func (m *MContainerProbe) setupManagerPcap() error {
 	}
 
 	var podNameList = m.conf.GetPodName()
-	m.logger.Println("CACAPTURE::\t pod name list is", podNameList)
 
-	if m.conf.GetContainerPID() == 0 && len(podNameList) != 0 {
+	if m.conf.GetMode() == "Containerd" {
 		// don't set the pid for the any container in pod, but give the pod name
 		// search the first net device which is not the lo
 
@@ -91,32 +91,50 @@ func (m *MContainerProbe) setupManagerPcap() error {
 			}
 
 			pid, err := getPid(status)
-			fmt.Println(podNameList)
+
 			// fmt.Println("the pid is", pid)
 			if err != nil {
 				m.logger.Println("Cann't get the pid from container%v", container.Id, err)
 			}
 			if contains(podNameList, "all") {
 				// 如果是all,则所有的pod都要添加tc
-				addPodNetworkInfo(pid, podName, podNetworksMap, config)
+				err := addPodNetworkInfo(pid, podName, podNetworksMap, config, m.conf.GetPodNsName())
+				if err != nil {
+					m.logger.Println("add pod networkinfo err: ", err)
+				}
 			} else if contains(podNameList, podName) {
 				// 否则判断pod是否在podNameList中，再则加入
-				addPodNetworkInfo(pid, podName, podNetworksMap, config)
+				err := addPodNetworkInfo(pid, podName, podNetworksMap, config, m.conf.GetPodNsName())
+				if err != nil {
+					m.logger.Println("add pod networkinfo err: ", err)
+				}
+
 			} else {
 				// 不在则直接掠过
-				fmt.Println(podName)
 				continue
 			}
 
 		}
 
-	} else {
+	} else if m.conf.GetMode() == "Docker" {
 		// 对于docker 模式，则直接将第一块不是回环的虚拟网卡添加
-		addPodNetworkInfo(int(m.conf.GetContainerPID()), "", podNetworksMap, nil)
+		cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+		if err != nil {
+			m.logger.Println(" Cann't find the client for Docker")
+			return err
+		}
+		containerJSON, err := cli.ContainerInspect(context.Background(), m.conf.GetContainerID())
+		if err != nil {
+			m.logger.Println(" Cann't find the PID for Docker Container")
+			return err
+		}
+		addPodNetworkInfo(int(containerJSON.State.Pid), "Docker Mode", podNetworksMap, nil, "")
+	} else {
+		m.logger.Println("Other Container Runtime doesn't support")
 	}
-	m.logger.Println("CACAPTURE::\tgive the pod infomation as follows")
+	m.logger.Println("give the pod infomation as follows")
 	for _, podInfo := range podNetworksMap {
-		m.logger.Printf("CACAPTURE::\tthe pod name is %s,the iface name is %s,the iface index is %v, the ns is %s\n", podInfo.Podname, podInfo.Ifname, podInfo.Ifindex, podInfo.NsHandel.String())
+		m.logger.Printf("pod name:%s,iface:%s,iface index:%v,ns:%s\n", podInfo.Podname, podInfo.Ifname, podInfo.Ifindex, podInfo.NsHandel.String())
 	}
 	if len(podNetworksMap) == 1 {
 		m.logger.Println("only have one pod")
@@ -170,11 +188,8 @@ func (m *MContainerProbe) setupManagerPcap() error {
 
 	}
 
-	// binaryPath = m.conf.(*config.ContainerConfig).Openssl
 	m.sslBpfFile = "tc.o" // assinged by caffein
-	// m.logger.Printf("%s\tHOOK type:%d, binrayPath:%s\n", m.Name(), m.conf.(*config.ContainerConfig).ElfType, binaryPath)
-	// m.logger.Printf("%s\tIfname:%s, Ifindex:%d,  Port:%d, Pcapng filepath:%s\n", m.Name(), m.ifName, m.ifIdex, m.conf.(*config.ContainerConfig).Port, m.pcapngFilename)
-	// m.logger.Printf("%s\tHook masterKey function:%s\n", m.Name(), m.masterHookFunc)
+
 	netIfs, err := net.Interfaces()
 	if err != nil {
 		return err
@@ -213,42 +228,7 @@ func (m *MContainerProbe) setupManagerPcap() error {
 		},
 	}
 
-	if m.conf.EnableGlobalVar() {
-		// 填充 RewriteContants 对应map
-		m.bpfManagerOptions.ConstantEditors = m.constantEditor()
-	}
 	return nil
-}
-func (m *MContainerProbe) constantEditor() []manager.ConstantEditor {
-	var editor = []manager.ConstantEditor{
-		{
-			Name:  "target_pid",
-			Value: uint64(m.conf.GetPid()),
-			//FailOnMissing: true,
-		},
-		{
-			Name:  "target_uid",
-			Value: uint64(m.conf.GetUid()),
-		},
-		{
-			Name:  "target_port",
-			Value: uint64(m.conf.(*config.ContainerConfig).Port),
-		},
-	}
-
-	if m.conf.GetPid() <= 0 {
-		m.logger.Printf("%s\ttarget all process. \n", m.Name())
-	} else {
-		m.logger.Printf("%s\ttarget PID:%d \n", m.Name(), m.conf.GetPid())
-	}
-
-	if m.conf.GetUid() <= 0 {
-		m.logger.Printf("%s\ttarget all users. \n", m.Name())
-	} else {
-		m.logger.Printf("%s\ttarget UID:%d \n", m.Name(), m.conf.GetUid())
-	}
-
-	return editor
 }
 
 func (m *MContainerProbe) initDecodeFunPcap() error {
@@ -262,24 +242,8 @@ func (m *MContainerProbe) initDecodeFunPcap() error {
 	}
 	m.eventMaps = append(m.eventMaps, SkbEventsMap)
 	sslEvent := &event.TcSkbEvent{}
-	//sslEvent.SetModule(m)
 	m.eventFuncMaps[SkbEventsMap] = sslEvent
 
-	// MasterkeyEventsMap, found, err := m.bpfManager.GetMap("mastersecret_events")
-	// if err != nil {
-	// 	return err
-	// }
-	// if !found {
-	// 	return errors.New("cant found map:mastersecret_events")
-	// }
-	// m.eventMaps = append(m.eventMaps, MasterkeyEventsMap)
-
-	// var masterkeyEvent event.IEventStruct
-
-	// masterkeyEvent = &event.MasterSecretEvent{}
-
-	// //masterkeyEvent.SetModule(m)
-	// m.eventFuncMaps[MasterkeyEventsMap] = masterkeyEvent
 	return nil
 }
 
@@ -301,13 +265,13 @@ func getPid(status *runtimeapi.ContainerStatusResponse) (int, error) {
 	return int(pidValue.(float64)), nil
 
 }
-func addPodNetworkInfo(pid int, podName string, podNetworksMap map[string]*PodNetworkInfo, config *rest.Config) error {
+func addPodNetworkInfo(pid int, podName string, podNetworksMap map[string]*PodNetworkInfo, config *rest.Config, podNsName string) error {
 	var podIP string
 	if config == nil {
 		podIP = ""
 	} else {
 		var err error
-		podIP, err = getPodIP(podName, config)
+		podIP, err = getPodIP(podName, podNsName, config)
 		if err != nil {
 			return err
 		}
@@ -376,28 +340,25 @@ func contains(s []string, str string) bool {
 	return false
 }
 
-func getPodIP(podName string, config *rest.Config) (string, error) {
+func getPodIP(podName string, podNSName string, config *rest.Config) (string, error) {
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		return "", errors.New("Cann't get the clientset from config")
+		return "", err
 	}
-	namespaces, err := clientset.CoreV1().Namespaces().List(context.TODO(), metav1.ListOptions{})
-	if err != nil {
-		return "", errors.New("Cann't get the ns form clientset")
+	// namespaces, err := clientset.CoreV1().Namespaces("default").List(context.TODO(), metav1.ListOptions{})
+	// // if err != nil {
+	// // 	return "", err
 
-	}
-	for _, namespace := range namespaces.Items {
-		pods, err := clientset.CoreV1().Pods(namespace.Name).List(context.TODO(), metav1.ListOptions{})
-		if err != nil {
-			continue
-		}
+	// // }
+	// // for _, namespace := range namespaces.Items {
+	pods, err := clientset.CoreV1().Pods(podNSName).List(context.TODO(), metav1.ListOptions{})
 
-		for _, pod := range pods.Items {
-			if pod.Name == podName {
-				return pod.Status.PodIP, nil
-			}
+	for _, pod := range pods.Items {
+		if pod.Name == podName {
+			return pod.Status.PodIP, nil
 		}
 	}
+	// }
 	return "", errors.New("Cann't find the pod for given pod name")
 
 }

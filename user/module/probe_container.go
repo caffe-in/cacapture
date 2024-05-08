@@ -39,6 +39,7 @@ type MContainerProbe struct {
 	eBPFProgramType   TlsCaptureModelType
 	sslBpfFile        string // ssl bpf file
 
+	UDP_conn *net.UDPConn
 }
 
 func (m *MContainerProbe) Init(ctx context.Context, logger *log.Logger, conf config.IConfig) error {
@@ -121,16 +122,9 @@ func (m *MContainerProbe) start() error {
 
 func (m *MContainerProbe) Dispatcher(eventStruct event.IEventStruct) {
 
-	if m.conf.GetSentNet() {
-		err := m.SendTcSkb(eventStruct.(*event.TcSkbEvent))
-		if err != nil {
-			m.logger.Printf("%s\t send packet error %s .\n", m.Name(), err.Error())
-		}
-	} else {
-		err := m.dumpTcSkb(eventStruct.(*event.TcSkbEvent))
-		if err != nil {
-			m.logger.Printf("%s\t save packet error %s .\n", m.Name(), err.Error())
-		}
+	err := m.dumpTcSkb(eventStruct.(*event.TcSkbEvent))
+	if err != nil {
+		m.logger.Printf("%s\t save packet error %s .\n", m.Name(), err.Error())
 	}
 
 }
@@ -174,10 +168,6 @@ func (m *MContainerProbe) DecodeFun(em *ebpf.Map) (event.IEventStruct, bool) {
 	return fun, found
 }
 func (m *MContainerProbe) InitUPDConn() error {
-	// netns.Set(m.conf.GetnsHandle())
-	// currNs, _ := netns.Get()
-	// fmt.Println("currNs:", currNs)
-	// change the m.conf.GetDstIP() to byte,byte,byte,byte
 	dstAddr := &net.UDPAddr{
 		IP:   net.ParseIP(m.conf.GetDstIP()).To4(),
 		Port: m.conf.GetDstPort(),
@@ -188,7 +178,7 @@ func (m *MContainerProbe) InitUPDConn() error {
 		fmt.Println("DialUDP failed: ", err)
 		return err
 	}
-	m.MTCProbe.UDP_conn = conn
+	m.UDP_conn = conn
 	return nil
 }
 func (m *MContainerProbe) CloseUPDConn() {

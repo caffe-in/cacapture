@@ -31,9 +31,16 @@ type IConfig interface {
 
 	SetPodName(string)
 	GetPodName() []string
+
+	SetMode(string)
+	GetMode() string
+
+	SetPodNsName(string)
+	GetPodNsName() string
 }
 
 type eConfig struct {
+	Mode          string
 	Pid           uint64
 	Uid           uint64
 	PerCpuMapSize int // ebpf map size for per Cpu.   see https://github.com/gojue/CACAPTURE/issues/433 .
@@ -44,6 +51,7 @@ type eConfig struct {
 	ContainerPID  uint
 	ContainerID   string
 	PodName       []string
+	PodNsName     string
 }
 
 func (c *eConfig) GetPerCpuMapSize() int {
@@ -102,10 +110,10 @@ func (c *eConfig) SetContainerPID(cid uint) {
 func (c *eConfig) GetContainerPID() uint {
 	return c.ContainerPID
 }
-func (c *eConfig) SetContainerID(cid string){
-	c.ContainerID= cid
+func (c *eConfig) SetContainerID(cid string) {
+	c.ContainerID = cid
 }
-func (c *eConfig)GetContainerID()string{
+func (c *eConfig) GetContainerID() string {
 	return c.ContainerID
 }
 
@@ -114,4 +122,17 @@ func (c *eConfig) SetPodName(podname string) {
 }
 func (c *eConfig) GetPodName() []string {
 	return c.PodName
+}
+
+func (c *eConfig) SetMode(mode string) {
+	c.Mode = mode
+}
+func (c *eConfig) GetMode() string {
+	return c.Mode
+}
+func (c *eConfig) SetPodNsName(ns string) {
+	c.PodNsName = ns
+}
+func (c *eConfig) GetPodNsName() string {
+	return c.PodNsName
 }

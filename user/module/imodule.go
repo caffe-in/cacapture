@@ -78,7 +78,7 @@ func (m *Module) SetChild(module IModule) {
 }
 
 func (m *Module) Run() error {
-	m.logger.Printf("CACAPTURE ::\tModule.Run()")
+	m.logger.Printf("Module.Run()")
 	//  start
 	err := m.child.Start()
 	if err != nil {
@@ -200,9 +200,7 @@ func (m *Module) perfEventReader(errChan chan error, em *ebpf.Map) {
 
 				copy(actualBuffer[VXLANHeaderSize:], record.RawSample[36:36+rawSampleSize])
 				ethernetFrame := actualBuffer
-				// // m.logger.Printf("send packet to UDP, the size of payload is: %d", len(ethernetFrame))
-				_, err := m.child.(*MContainerProbe).MTCProbe.UDP_conn.Write(ethernetFrame)
-				// conn.Write(ethernetFrame)
+				_, err := m.child.(*MContainerProbe).UDP_conn.Write(ethernetFrame)
 				vxlanBufferPool.Put(buffer)
 				if err != nil {
 					log.Println("Write to UDP failed: ", err, "the size of packetBytes is: ", len(ethernetFrame))

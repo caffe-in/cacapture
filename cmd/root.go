@@ -32,12 +32,13 @@ var rootCmd = &cobra.Command{
 }
 
 func init() {
-
+	rootCmd.PersistentFlags().IntVar(&rc.PerCpuMapSize, "mapsize", 2048, "eBPF map size per CPU,for events buffer. default:1024 * PAGESIZE. (KB)")
+	rootCmd.PersistentFlags().StringVar(&rc.Mode, "Mode", "Containerd", "the mode for which container will be monitor, Docker or Containerd")
 	rootCmd.PersistentFlags().StringVar(&rc.ContainerID, "ContainerID", "", "the container ID which container is monitored")
-	rootCmd.PersistentFlags().UintVar(&rc.ContainerPID, "ContainerPID", 0, "the pid which container is monitored, when ContainerID given, the pid can be empty")
 	rootCmd.PersistentFlags().StringSliceVar(&rc.PodName, "PodName", []string{}, "the pod's name or pod lists name which we will monitor")
+	rootCmd.PersistentFlags().StringVar(&rc.PodNsName, "PodNsName", "default", "the pod's ns name for the pod in")
 	rootCmd.PersistentFlags().StringVar(&rc.Ifname, "Ifname", "", "ifname")
-	rootCmd.PersistentFlags().StringVar(&rc.PcapFile, "PcapFile", "", "pcapngFilename")
+	rootCmd.PersistentFlags().StringVar(&rc.PcapFile, "PcapFile", "capture_msg/test.pcapng", "pcapngFilename")
 	rootCmd.PersistentFlags().BoolVar(&rc.SentNet, "Sentnet", false, "sent_net")
 	rootCmd.PersistentFlags().StringVar(&rc.DstIP, "DstIP", "172.16.8.64", "dstIP")
 	rootCmd.PersistentFlags().IntVar(&rc.DstPort, "DstPort", 4789, "dstPort")
@@ -62,8 +63,12 @@ func cacaptureCommandFunc(cmd *cobra.Command, args []string) {
 	ctx, cancelFun := context.WithCancel(context.Background())
 
 	logger := log.New(os.Stdout, "cacapture: ", log.LstdFlags)
+	if rc.Mode != "Docker" && rc.Mode != "Containerd" {
+		logger.Printf("only support container runtime for docker and containerd, please input the mode with Docker or Containerd")
+		os.Exit(0)
+	}
 
-	logger.Printf("CACAPTURE:: Pid Info: %d", os.Getpid())
+	logger.Printf("cacapture pid info: %d", os.Getpid())
 
 	var modNames = []string{module.ModuleNameContainer}
 
@@ -74,7 +79,7 @@ func cacaptureCommandFunc(cmd *cobra.Command, args []string) {
 	for _, modName := range modNames {
 		mod := module.GetModuleByName(modName)
 		if mod == nil {
-			logger.Printf("Module %s not found", modName)
+			logger.Printf("module %s not found", modName)
 			break
 		}
 
@@ -82,6 +87,7 @@ func cacaptureCommandFunc(cmd *cobra.Command, args []string) {
 		var conf config.IConfig
 
 		conf = rc
+		conf.SetPerCpuMapSize(rc.PerCpuMapSize)
 		err := mod.Init(ctx, logger, conf)
 
 		if err != nil {
@@ -102,10 +108,10 @@ func cacaptureCommandFunc(cmd *cobra.Command, args []string) {
 	}
 
 	if runMods > 0 {
-		logger.Printf("CACAPTURE :: \tstart %d modules", runMods)
+		logger.Printf("start %d modules", runMods)
 		<-stopper
 	} else {
-		logger.Println("CACAPTURE :: \tNo runnable modules, Exit(1)")
+		logger.Println("No runnable modules, Exit(1)")
 		os.Exit(1)
 	}
 	cancelFun()

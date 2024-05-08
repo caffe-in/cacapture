@@ -6,7 +6,6 @@ import (
 	"cacapture/user/event"
 	"encoding/binary"
 	"fmt"
-	"log"
 	"math"
 	"net"
 	"os"
@@ -64,8 +63,6 @@ type MTCProbe struct {
 	tcPacketLocker  *sync.Mutex
 
 	tc_buffer_packets int
-
-	UDP_conn *net.UDPConn
 }
 
 func (p *packetMetaData) Pack() ([]byte, error) {
@@ -124,57 +121,6 @@ func (t *MTCProbe) writePacket(dataLen uint32, timeStamp time.Time, packetBytes 
 		t.tcPackets = t.tcPackets[:0]
 	}
 	return nil
-}
-
-func (t *MTCProbe) sendPacket(dataLen uint32, timeStamp time.Time, packetBytes []byte) error {
-
-	// check the current ns
-
-	PacketCount++
-	vxlanHeader := VXLANHeader{
-		Flags: 0x8,
-	}
-	vxlanHeader.VNI[0] = byte((VNI_NUM >> 16) & 0xFF) // 获取VNI的高8位
-	vxlanHeader.VNI[1] = byte((VNI_NUM >> 8) & 0xFF)  // 获取VNI的中间8位
-	vxlanHeader.VNI[2] = byte(VNI_NUM & 0xFF)         // 获取VNI的低8位
-
-	buffer := vxlanBufferPool.Get().([]byte)
-	actualBuffer := buffer[:VXLANHeaderSize+len(packetBytes)]
-	actualBuffer[0] = 0x08 // Flags字段，设置VXLAN头的标志位，其中0x08表示VNI存在
-	// 接下来的3个字节 (_ [3]byte) 默认为0，不需要操作
-
-	// 设置VNI字段
-	actualBuffer[4] = byte((VNI_NUM >> 16) & 0xFF) // VNI的高8位
-	actualBuffer[5] = byte((VNI_NUM >> 8) & 0xFF)  // VNI的中间8位
-	actualBuffer[6] = byte(VNI_NUM & 0xFF)
-
-	copy(actualBuffer[VXLANHeaderSize:], packetBytes)
-	ethernetFrame := actualBuffer
-
-	_, err := t.UDP_conn.Write(ethernetFrame)
-	if err != nil {
-		log.Println("Write to UDP failed: ", err, "the size of packetBytes is: ", len(ethernetFrame))
-
-		return err
-	}
-	return nil
-
-}
-func (t *MTCProbe) SendTcSkb(tcEvent *event.TcSkbEvent) error {
-	var timeStamp = t.bootTime + tcEvent.Ts
-	var payload []byte
-	payload = tcEvent.Payload()
-	if tcEvent.Pid > 0 {
-		err, p := t.writePid(tcEvent)
-		if err == nil {
-			payload = p
-			//fmt.Printf("pid:%d, comm:%s, cmdline:%s\n", tcEvent.Pid, tcEvent.Comm, tcEvent.Cmdline)
-		}
-	}
-
-	// log.Printf("send packet to UDP, the size of payload is: %d", len(payload))
-	return t.sendPacket(uint32(len(payload)), time.Unix(0, int64(timeStamp)), payload)
-
 }
 
 func (t *MTCProbe) dumpTcSkb(tcEvent *event.TcSkbEvent) error {

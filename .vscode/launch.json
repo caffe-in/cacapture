@@ -15,11 +15,9 @@
             "program": "main.go",
             "args": [
 
-            "--PodName","all",
-            //  "--containerPID", "4876",
-             "--ifname","eth0",
-             "--PcapFile","./capture_msg/test.pcapng",
-            //  "--sentnet"
+                "--Mode","Docker",
+                "--ContainerID","0f550e104309",
+                "--Sentnet"
             ],
          }
     ]
