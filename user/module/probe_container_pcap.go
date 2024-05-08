@@ -16,6 +16,10 @@ import (
 	"github.com/vishvananda/netns"
 	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 	runtimeapi "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
 )
 
@@ -34,6 +38,11 @@ func (m *MContainerProbe) setupManagerPcap() error {
 
 	var probes []*manager.Probe
 	var podNetworksMap map[string]*PodNetworkInfo = make(map[string]*PodNetworkInfo)
+
+	config, err := clientcmd.BuildConfigFromFlags("", "/etc/kubernetes/kubelet.conf")
+	if err != nil {
+		m.logger.Println("cannot find the kubernetes conf in this node ", err)
+	}
 
 	var podNameList = m.conf.GetPodName()
 	m.logger.Println("CACAPTURE::\t pod name list is", podNameList)
@@ -88,11 +97,13 @@ func (m *MContainerProbe) setupManagerPcap() error {
 				m.logger.Println("Cann't get the pid from container%v", container.Id, err)
 			}
 			if contains(podNameList, "all") {
-				addPodNetworkInfo(pid, podName, podNetworksMap)
+				// 如果是all,则所有的pod都要添加tc
+				addPodNetworkInfo(pid, podName, podNetworksMap, config)
 			} else if contains(podNameList, podName) {
-
-				addPodNetworkInfo(pid, podName, podNetworksMap)
+				// 否则判断pod是否在podNameList中，再则加入
+				addPodNetworkInfo(pid, podName, podNetworksMap, config)
 			} else {
+				// 不在则直接掠过
 				fmt.Println(podName)
 				continue
 			}
@@ -100,7 +111,8 @@ func (m *MContainerProbe) setupManagerPcap() error {
 		}
 
 	} else {
-		addPodNetworkInfo(int(m.conf.GetContainerPID()), "", podNetworksMap)
+		// 对于docker 模式，则直接将第一块不是回环的虚拟网卡添加
+		addPodNetworkInfo(int(m.conf.GetContainerPID()), "", podNetworksMap, nil)
 	}
 	m.logger.Println("CACAPTURE::\tgive the pod infomation as follows")
 	for _, podInfo := range podNetworksMap {
@@ -207,6 +219,37 @@ func (m *MContainerProbe) setupManagerPcap() error {
 	}
 	return nil
 }
+func (m *MContainerProbe) constantEditor() []manager.ConstantEditor {
+	var editor = []manager.ConstantEditor{
+		{
+			Name:  "target_pid",
+			Value: uint64(m.conf.GetPid()),
+			//FailOnMissing: true,
+		},
+		{
+			Name:  "target_uid",
+			Value: uint64(m.conf.GetUid()),
+		},
+		{
+			Name:  "target_port",
+			Value: uint64(m.conf.(*config.ContainerConfig).Port),
+		},
+	}
+
+	if m.conf.GetPid() <= 0 {
+		m.logger.Printf("%s\ttarget all process. \n", m.Name())
+	} else {
+		m.logger.Printf("%s\ttarget PID:%d \n", m.Name(), m.conf.GetPid())
+	}
+
+	if m.conf.GetUid() <= 0 {
+		m.logger.Printf("%s\ttarget all users. \n", m.Name())
+	} else {
+		m.logger.Printf("%s\ttarget UID:%d \n", m.Name(), m.conf.GetUid())
+	}
+
+	return editor
+}
 
 func (m *MContainerProbe) initDecodeFunPcap() error {
 	//SkbEventsMap 与解码函数映射
@@ -258,7 +301,18 @@ func getPid(status *runtimeapi.ContainerStatusResponse) (int, error) {
 	return int(pidValue.(float64)), nil
 
 }
-func addPodNetworkInfo(pid int, podName string, podNetworksMap map[string]*PodNetworkInfo) error {
+func addPodNetworkInfo(pid int, podName string, podNetworksMap map[string]*PodNetworkInfo, config *rest.Config) error {
+	var podIP string
+	if config == nil {
+		podIP = ""
+	} else {
+		var err error
+		podIP, err = getPodIP(podName, config)
+		if err != nil {
+			return err
+		}
+	}
+
 	originalNs, _ := netns.Get()
 	defer netns.Set(originalNs)
 	nsPath := fmt.Sprintf("/proc/%d/ns/net", pid)
@@ -272,12 +326,38 @@ func addPodNetworkInfo(pid int, podName string, podNetworksMap map[string]*PodNe
 	if err != nil {
 		return err
 	}
+
 	var selectedInterface net.Interface
+	found := false
 	for _, iface := range ifaces {
-		if iface.Flags&net.FlagLoopback != net.FlagLoopback {
-			selectedInterface = iface
-			break
+		if podIP != "" { // pod 模式
+			addrs, err := iface.Addrs()
+			if err != nil {
+				return err
+			}
+			for _, addr := range addrs {
+				// 尝试将地址断言为 *net.IPNet 类型
+				switch v := addr.(type) {
+				case *net.IPNet:
+					// 检查 IP 地址是否匹配 Pod IP
+					if v.IP.String() == podIP {
+						selectedInterface = iface
+						found = true
+						break
+					}
+				}
+			}
+			if found {
+				break
+			}
+
+		} else { //docker 模式
+			if iface.Flags&net.FlagLoopback != net.FlagLoopback {
+				selectedInterface = iface
+				break
+			}
 		}
+
 	}
 	podNetworksMap[podName] = &PodNetworkInfo{
 		Podname:  podName,
@@ -294,4 +374,30 @@ func contains(s []string, str string) bool {
 		}
 	}
 	return false
+}
+
+func getPodIP(podName string, config *rest.Config) (string, error) {
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return "", errors.New("Cann't get the clientset from config")
+	}
+	namespaces, err := clientset.CoreV1().Namespaces().List(context.TODO(), metav1.ListOptions{})
+	if err != nil {
+		return "", errors.New("Cann't get the ns form clientset")
+
+	}
+	for _, namespace := range namespaces.Items {
+		pods, err := clientset.CoreV1().Pods(namespace.Name).List(context.TODO(), metav1.ListOptions{})
+		if err != nil {
+			continue
+		}
+
+		for _, pod := range pods.Items {
+			if pod.Name == podName {
+				return pod.Status.PodIP, nil
+			}
+		}
+	}
+	return "", errors.New("Cann't find the pod for given pod name")
+
 }

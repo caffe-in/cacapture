@@ -152,23 +152,6 @@ func (m *Module) perfEventReader(errChan chan error, em *ebpf.Map) {
 	}
 	m.reader = append(m.reader, rd)
 
-	// todo: multi-thread to process events
-
-	// eventChan := make(chan []byte, 1000)
-	// for i := 0; i < numWorkers; i++ {
-	// 	go func() {
-	// 		for rawEvent := range eventChan {
-	// 			var e event.IEventStruct
-	// 			e, err = m.child.Decode(em, rawEvent)
-	// 			if err != nil {
-	// 				m.logger.Printf("%s\tm.child.decode error:%v", m.child.Name(), err)
-	// 				continue
-	// 			}
-	// 			m.Dispatcher(e)
-	// 		}
-	// 	}()
-	// }
-
 	go func() {
 		// m.child.(*MContainerProbe).InitUPDConn()
 		for {

@@ -10,7 +10,6 @@ import (
 	"sync"
 	"syscall"
 
-	"net/http"
 	_ "net/http/pprof"
 
 	"github.com/spf13/cobra"
@@ -33,20 +32,15 @@ var rootCmd = &cobra.Command{
 }
 
 func init() {
-	log.Println("hello")
-	rootCmd.PersistentFlags().BoolVarP(&rc.Debug, "debug", "d", false, "enable debug logging.(coming soon)")
-	rootCmd.PersistentFlags().BoolVar(&rc.IsHex, "hex", false, "print byte strings as hex encoded strings")
-	rootCmd.PersistentFlags().IntVar(&rc.PerCpuMapSize, "mapsize", 1024, "eBPF map size per CPU,for events buffer. default:1024 * PAGESIZE. (KB)")
-	rootCmd.PersistentFlags().Uint64VarP(&rc.Pid, "pid", "p", defaultPid, "if pid is 0 then we target all pids")
-	rootCmd.PersistentFlags().Uint64VarP(&rc.Uid, "uid", "u", defaultUid, "if uid is 0 then we target all users")
-	rootCmd.PersistentFlags().StringVar(&rc.ContainerID, "containerID", "", "containerID")
-	rootCmd.PersistentFlags().UintVar(&rc.ContainerPID, "containerPID", 0, "the pid which container runing")
+
+	rootCmd.PersistentFlags().StringVar(&rc.ContainerID, "ContainerID", "", "the container ID which container is monitored")
+	rootCmd.PersistentFlags().UintVar(&rc.ContainerPID, "ContainerPID", 0, "the pid which container is monitored, when ContainerID given, the pid can be empty")
 	rootCmd.PersistentFlags().StringSliceVar(&rc.PodName, "PodName", []string{}, "the pod's name or pod lists name which we will monitor")
-	rootCmd.PersistentFlags().StringVar(&rc.Ifname, "ifname", "", "ifname")
+	rootCmd.PersistentFlags().StringVar(&rc.Ifname, "Ifname", "", "ifname")
 	rootCmd.PersistentFlags().StringVar(&rc.PcapFile, "PcapFile", "", "pcapngFilename")
-	rootCmd.PersistentFlags().BoolVar(&rc.SentNet, "sentnet", false, "sent_net")
-	rootCmd.PersistentFlags().StringVar(&rc.DstIP, "dstIP", "172.16.8.64", "dstIP")
-	rootCmd.PersistentFlags().IntVar(&rc.DstPort, "dstPort", 4789, "dstPort")
+	rootCmd.PersistentFlags().BoolVar(&rc.SentNet, "Sentnet", false, "sent_net")
+	rootCmd.PersistentFlags().StringVar(&rc.DstIP, "DstIP", "172.16.8.64", "dstIP")
+	rootCmd.PersistentFlags().IntVar(&rc.DstPort, "DstPort", 4789, "dstPort")
 
 }
 
@@ -62,22 +56,12 @@ func getConf(command *cobra.Command) (conf config.Config, err error) {
 	return conf, nil
 }
 func cacaptureCommandFunc(cmd *cobra.Command, args []string) {
-	go func() {
-		log.Println(http.ListenAndServe(":6060", nil))
-	}()
 
-	// runtime.LockOSThread()
-	// defer runtime.UnlockOSThread()
 	stopper := make(chan os.Signal, 1)
 	signal.Notify(stopper, os.Interrupt, syscall.SIGTERM)
 	ctx, cancelFun := context.WithCancel(context.Background())
 
 	logger := log.New(os.Stdout, "cacapture: ", log.LstdFlags)
-	// gConf, err := getGlobalConf(cmd)
-	// if err != nil {
-	// 	logger.Println("Error:", err)
-	// 	return
-	// }
 
 	logger.Printf("CACAPTURE:: Pid Info: %d", os.Getpid())
 
@@ -86,20 +70,6 @@ func cacaptureCommandFunc(cmd *cobra.Command, args []string) {
 	var runMods uint8
 	var runModules = make(map[string]module.IModule)
 	var wg sync.WaitGroup
-
-	// nsHandle, err := netns.GetFromDocker(rc.ContainerID)
-	// if err != nil {
-	// 	logger.Printf("Container %s cann't find: %v", rc.ContainerID, err)
-	// 	panic(err)
-	// }
-	// defer nsHandle.Close()
-
-	// err = netns.Set(nsHandle)
-
-	// if err != nil {
-	// 	logger.Printf("Container %s namespace cann't set: %v", rc.ContainerID, err)
-	// 	panic(err)
-	// }
 
 	for _, modName := range modNames {
 		mod := module.GetModuleByName(modName)
@@ -110,8 +80,8 @@ func cacaptureCommandFunc(cmd *cobra.Command, args []string) {
 
 		logger.Printf("%s\tmodule initialization", mod.Name())
 		var conf config.IConfig
+
 		conf = rc
-		conf.SetPerCpuMapSize(rc.PerCpuMapSize)
 		err := mod.Init(ctx, logger, conf)
 
 		if err != nil {

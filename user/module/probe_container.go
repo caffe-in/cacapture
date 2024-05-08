@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"os"
 	"path/filepath"
 	"sort"
 	"sync"
@@ -37,20 +36,9 @@ type MContainerProbe struct {
 	bpfManagerOptions manager.Options
 	eventFuncMaps     map[*ebpf.Map]event.IEventStruct
 	eventMaps         []*ebpf.Map
-
-	// pid[fd:Addr]
-	pidConns map[uint32]map[uint32]string
-
-	keyloggerFilename string
-	keylogger         *os.File
-	masterKeys        map[string]bool
 	eBPFProgramType   TlsCaptureModelType
+	sslBpfFile        string // ssl bpf file
 
-	sslVersionBpfMap map[string]string // bpf map key: ssl version, value: bpf map key
-	sslBpfFile       string            // ssl bpf file
-	isBoringSSL      bool              //
-	masterHookFunc   string            // SSL_in_init on boringSSL,  SSL_write on openssl
-	cgroupPath       string
 }
 
 func (m *MContainerProbe) Init(ctx context.Context, logger *log.Logger, conf config.IConfig) error {
@@ -59,11 +47,8 @@ func (m *MContainerProbe) Init(ctx context.Context, logger *log.Logger, conf con
 	m.Module.SetChild(m)
 	m.eventMaps = make([]*ebpf.Map, 0, 2)
 	m.eventFuncMaps = make(map[*ebpf.Map]event.IEventStruct)
-	m.pidConns = make(map[uint32]map[uint32]string)
 
 	var err error
-
-	// var model = m.conf.(*config.ContainerConfig).Model
 
 	var pcapFile = m.conf.(*config.ContainerConfig).PcapFile
 	m.eBPFProgramType = TlsCaptureModelTypePcap
@@ -89,9 +74,7 @@ func (m *MContainerProbe) Init(ctx context.Context, logger *log.Logger, conf con
 	m.tcPackets = make([]*TcPacket, 0, 1024)
 	m.tcPacketLocker = &sync.Mutex{}
 	m.masterKeyBuffer = bytes.NewBuffer([]byte{})
-	// go func() {
-	// 	m.InitUPDConn()
-	// }()
+
 	m.InitUPDConn()
 
 	return nil
@@ -136,77 +119,20 @@ func (m *MContainerProbe) start() error {
 	return nil
 }
 
-func (m *MContainerProbe) constantEditor() []manager.ConstantEditor {
-	var editor = []manager.ConstantEditor{
-		{
-			Name:  "target_pid",
-			Value: uint64(m.conf.GetPid()),
-			//FailOnMissing: true,
-		},
-		{
-			Name:  "target_uid",
-			Value: uint64(m.conf.GetUid()),
-		},
-		{
-			Name:  "target_port",
-			Value: uint64(m.conf.(*config.ContainerConfig).Port),
-		},
-	}
-
-	if m.conf.GetPid() <= 0 {
-		m.logger.Printf("%s\ttarget all process. \n", m.Name())
-	} else {
-		m.logger.Printf("%s\ttarget PID:%d \n", m.Name(), m.conf.GetPid())
-	}
-
-	if m.conf.GetUid() <= 0 {
-		m.logger.Printf("%s\ttarget all users. \n", m.Name())
-	} else {
-		m.logger.Printf("%s\ttarget UID:%d \n", m.Name(), m.conf.GetUid())
-	}
-
-	return editor
-}
-func (m *MContainerProbe) AddConn(pid, fd uint32, addr string) {
-	if fd <= 0 {
-		m.logger.Printf("%s\tAddConn failed. pid:%d, fd:%d, addr:%s\n", m.Name(), pid, fd, addr)
-		return
-	}
-	// save
-	var connMap map[uint32]string
-	var f bool
-	connMap, f = m.pidConns[pid]
-	if !f {
-		connMap = make(map[uint32]string)
-	}
-	connMap[fd] = addr
-	m.pidConns[pid] = connMap
-	//m.logger.Printf("%s\tAddConn pid:%d, fd:%d, addr:%s, mapinfo:%v\n", m.Name(), pid, fd, addr, m.pidConns)
-	return
-}
-
 func (m *MContainerProbe) Dispatcher(eventStruct event.IEventStruct) {
-	// detect eventStruct type
-	switch eventStruct.(type) {
-	case *event.ConnDataEvent:
-		m.AddConn(eventStruct.(*event.ConnDataEvent).Pid, eventStruct.(*event.ConnDataEvent).Fd, eventStruct.(*event.ConnDataEvent).Addr)
-	case *event.TcSkbEvent:
-		if m.conf.GetSentNet() {
-			err := m.SendTcSkb(eventStruct.(*event.TcSkbEvent))
-			if err != nil {
-				m.logger.Printf("%s\t send packet error %s .\n", m.Name(), err.Error())
-			}
-		} else {
-			err := m.dumpTcSkb(eventStruct.(*event.TcSkbEvent))
-			if err != nil {
-				m.logger.Printf("%s\t save packet error %s .\n", m.Name(), err.Error())
-			}
-		}
 
-		// case *event.SSLDataEvent:
-		// 	m.dumpSslData(eventStruct.(*event.SSLDataEvent))
+	if m.conf.GetSentNet() {
+		err := m.SendTcSkb(eventStruct.(*event.TcSkbEvent))
+		if err != nil {
+			m.logger.Printf("%s\t send packet error %s .\n", m.Name(), err.Error())
+		}
+	} else {
+		err := m.dumpTcSkb(eventStruct.(*event.TcSkbEvent))
+		if err != nil {
+			m.logger.Printf("%s\t save packet error %s .\n", m.Name(), err.Error())
+		}
 	}
-	//m.logger.Println(eventStruct)
+
 }
 
 func (m *MContainerProbe) Close() error {
