@@ -45,7 +45,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&rc.Ifname, "ifname", "", "ifname")
 	rootCmd.PersistentFlags().StringVar(&rc.PcapFile, "PcapFile", "", "pcapngFilename")
 	rootCmd.PersistentFlags().BoolVar(&rc.SentNet, "sentnet", false, "sent_net")
-	rootCmd.PersistentFlags().StringVar(&rc.DstIP, "dstIP", "172.16.8.64", "dstIP")
+	rootCmd.PersistentFlags().StringVar(&rc.DstIP, "dstIP", "172.17.0.3", "dstIP")
 	rootCmd.PersistentFlags().IntVar(&rc.DstPort, "dstPort", 4789, "dstPort")
 
 }
@@ -90,19 +90,19 @@ func cacaptureCommandFunc(cmd *cobra.Command, args []string) {
 	OrignalNsHandle, _ := netns.Get()
 	fmt.Println("OrignalNsHandle:", OrignalNsHandle)
 
-	nsHandle, err := netns.GetFromDocker(rc.ContainerID)
-	if err != nil {
-		logger.Printf("Container %s cann't find: %v", rc.ContainerID, err)
-		panic(err)
-	}
-	defer nsHandle.Close()
+	// nsHandle, err := netns.GetFromDocker(rc.ContainerID)
+	// if err != nil {
+	// 	logger.Printf("Container %s cann't find: %v", rc.ContainerID, err)
+	// 	panic(err)
+	// }
+	// defer nsHandle.Close()
 
-	err = netns.Set(nsHandle)
+	// err = netns.Set(nsHandle)
 
-	if err != nil {
-		logger.Printf("Container %s namespace cann't set: %v", rc.ContainerID, err)
-		panic(err)
-	}
+	// if err != nil {
+	// 	logger.Printf("Container %s namespace cann't set: %v", rc.ContainerID, err)
+	// 	panic(err)
+	// }
 
 	for _, modName := range modNames {
 		mod := module.GetModuleByName(modName)

@@ -92,9 +92,9 @@ func (m *Module) Run() error {
 	// go func() {
 	// 	m.processor.Serve()
 	// }()
-	// go func() {
-	// 	m.child.(*MContainerProbe).InitUPDConn()
-	// }()
+	go func() {
+		m.child.(*MContainerProbe).InitUPDConn()
+	}()
 
 	err = m.readEvents()
 	if err != nil {

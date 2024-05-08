@@ -92,7 +92,7 @@ func (m *MContainerProbe) Init(ctx context.Context, logger *log.Logger, conf con
 	// go func() {
 	// 	m.InitUPDConn()
 	// }()
-	m.InitUPDConn()
+	// m.InitUPDConn()
 
 	return nil
 

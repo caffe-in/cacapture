@@ -238,7 +238,7 @@ static __always_inline int capture_packets(struct __sk_buff *skb, bool is_ingres
     //     ifindex (u32)        4 bytes
     size_t pkt_size = TC_PACKET_MIN_SIZE;
     bpf_perf_event_output(skb, &skb_events, flags, &event, pkt_size);
-    bpf_printk("the protocol is %d\n", conn_id.protocol);
+    bpf_printk("the current cpu is %d\n", bpf_get_smp_processor_id());
     // bpf_printk("packet len : %d, ifindex :%d\n", event.len, event.ifindex);
     //    debug_bpf_printk("new packet captured on egress/ingress (TC),
     //    length:%d\n", data_len);
