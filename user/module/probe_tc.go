@@ -6,7 +6,6 @@ import (
 	"cacapture/user/event"
 	"encoding/binary"
 	"fmt"
-	"log"
 	"math"
 	"net"
 	"os"
@@ -20,7 +19,7 @@ import (
 	"github.com/google/gopacket/pcapgo"
 )
 
-const EcaptureMagic = 0xCC0C4CFC
+const CACAPTUREMagic = 0xCC0C4CFC
 
 const BufferPacketNum = 4000
 
@@ -64,8 +63,6 @@ type MTCProbe struct {
 	tcPacketLocker  *sync.Mutex
 
 	tc_buffer_packets int
-
-	UDP_conn *net.UDPConn
 }
 
 func (p *packetMetaData) Pack() ([]byte, error) {
@@ -103,7 +100,7 @@ func (t *MTCProbe) writePacket(dataLen uint32, timeStamp time.Time, packetBytes 
 
 		// set 0 default, Because the monitored network interface is the first one written into the pcapng header.
 		// 设置为0，因为被监听的网卡是第一个写入pcapng header中的。
-		// via : https://github.com/gojue/ecapture/issues/347
+		// via : https://github.com/gojue/CACAPTURE/issues/347
 		InterfaceIndex: 0,
 	}
 
@@ -124,57 +121,6 @@ func (t *MTCProbe) writePacket(dataLen uint32, timeStamp time.Time, packetBytes 
 		t.tcPackets = t.tcPackets[:0]
 	}
 	return nil
-}
-
-func (t *MTCProbe) sendPacket(dataLen uint32, timeStamp time.Time, packetBytes []byte) error {
-
-	// check the current ns
-
-	PacketCount++
-	vxlanHeader := VXLANHeader{
-		Flags: 0x8,
-	}
-	vxlanHeader.VNI[0] = byte((VNI_NUM >> 16) & 0xFF) // 获取VNI的高8位
-	vxlanHeader.VNI[1] = byte((VNI_NUM >> 8) & 0xFF)  // 获取VNI的中间8位
-	vxlanHeader.VNI[2] = byte(VNI_NUM & 0xFF)         // 获取VNI的低8位
-
-	buffer := vxlanBufferPool.Get().([]byte)
-	actualBuffer := buffer[:VXLANHeaderSize+len(packetBytes)]
-	actualBuffer[0] = 0x08 // Flags字段，设置VXLAN头的标志位，其中0x08表示VNI存在
-	// 接下来的3个字节 (_ [3]byte) 默认为0，不需要操作
-
-	// 设置VNI字段
-	actualBuffer[4] = byte((VNI_NUM >> 16) & 0xFF) // VNI的高8位
-	actualBuffer[5] = byte((VNI_NUM >> 8) & 0xFF)  // VNI的中间8位
-	actualBuffer[6] = byte(VNI_NUM & 0xFF)
-
-	copy(actualBuffer[VXLANHeaderSize:], packetBytes)
-	ethernetFrame := actualBuffer
-
-	_, err := t.UDP_conn.Write(ethernetFrame)
-	if err != nil {
-		log.Println("Write to UDP failed: ", err, "the size of packetBytes is: ", len(ethernetFrame))
-
-		return err
-	}
-	return nil
-
-}
-func (t *MTCProbe) SendTcSkb(tcEvent *event.TcSkbEvent) error {
-	var timeStamp = t.bootTime + tcEvent.Ts
-	var payload []byte
-	payload = tcEvent.Payload()
-	if tcEvent.Pid > 0 {
-		err, p := t.writePid(tcEvent)
-		if err == nil {
-			payload = p
-			//fmt.Printf("pid:%d, comm:%s, cmdline:%s\n", tcEvent.Pid, tcEvent.Comm, tcEvent.Cmdline)
-		}
-	}
-
-	// log.Printf("send packet to UDP, the size of payload is: %d", len(payload))
-	return t.sendPacket(uint32(len(payload)), time.Unix(0, int64(timeStamp)), payload)
-
 }
 
 func (t *MTCProbe) dumpTcSkb(tcEvent *event.TcSkbEvent) error {
@@ -207,7 +153,7 @@ func (t *MTCProbe) writePid(tcEvent *event.TcSkbEvent) (error, []byte) {
 		remainder = append(remainder, layer.LayerContents()...)
 	}
 	metadata := packetMetaData{}
-	metadata.Magic = EcaptureMagic
+	metadata.Magic = CACAPTUREMagic
 	metadata.Pid = tcEvent.Pid
 	var cmd = strings.TrimSpace(fmt.Sprintf("%s", tcEvent.Comm))
 	metadata.CmdLen = uint8(len(cmd))
@@ -261,19 +207,19 @@ func (t *MTCProbe) createPcapng(netIfs []net.Interface) error {
 		return fmt.Errorf("error creating pcap file: %v", err)
 	}
 
-	// TODO : write Application "ecapture.lua" to decode PID/Comm info.
+	// TODO : write Application "CACAPTURE.lua" to decode PID/Comm info.
 	pcapOption := pcapgo.NgWriterOptions{
 		SectionInfo: pcapgo.NgSectionInfo{
-			Hardware:    "eCapture (旁观者) Hardware",
+			Hardware:    "CACAPTURE (旁观者) Hardware",
 			OS:          "Linux/Android",
-			Application: "ecapture.lua",
-			Comment:     "see https://ecapture.cc for more information. CFC4N <cfc4n.cs@gmail.com>",
+			Application: "CACAPTURE.lua",
+			Comment:     "see https://CACAPTURE.cc for more information. CFC4N <cfc4n.cs@gmail.com>",
 		},
 	}
 	// write interface description
 	ngIface := pcapgo.NgInterface{
 		Name:       t.ifName,
-		Comment:    "eCapture (旁观者): github.com/gojue/ecapture",
+		Comment:    "CACAPTURE (旁观者): github.com/gojue/CACAPTURE",
 		Filter:     "",
 		LinkType:   layers.LinkTypeEthernet,
 		SnapLength: uint32(math.MaxUint16),
@@ -288,7 +234,7 @@ func (t *MTCProbe) createPcapng(netIfs []net.Interface) error {
 	for _, iface := range netIfs {
 		ngIface = pcapgo.NgInterface{
 			Name:       iface.Name,
-			Comment:    "eCapture (旁观者): github.com/gojue/ecapture",
+			Comment:    "CACAPTURE (旁观者): github.com/gojue/CACAPTURE",
 			Filter:     "",
 			LinkType:   layers.LinkTypeEthernet,
 			SnapLength: uint32(math.MaxUint16),

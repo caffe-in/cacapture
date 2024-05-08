@@ -78,7 +78,7 @@ func (m *Module) SetChild(module IModule) {
 }
 
 func (m *Module) Run() error {
-	m.logger.Printf("ECAPTURE ::\tModule.Run()")
+	m.logger.Printf("Module.Run()")
 	//  start
 	err := m.child.Start()
 	if err != nil {
@@ -152,23 +152,6 @@ func (m *Module) perfEventReader(errChan chan error, em *ebpf.Map) {
 	}
 	m.reader = append(m.reader, rd)
 
-	// todo: multi-thread to process events
-
-	// eventChan := make(chan []byte, 1000)
-	// for i := 0; i < numWorkers; i++ {
-	// 	go func() {
-	// 		for rawEvent := range eventChan {
-	// 			var e event.IEventStruct
-	// 			e, err = m.child.Decode(em, rawEvent)
-	// 			if err != nil {
-	// 				m.logger.Printf("%s\tm.child.decode error:%v", m.child.Name(), err)
-	// 				continue
-	// 			}
-	// 			m.Dispatcher(e)
-	// 		}
-	// 	}()
-	// }
-
 	go func() {
 		// m.child.(*MContainerProbe).InitUPDConn()
 		for {
@@ -217,9 +200,7 @@ func (m *Module) perfEventReader(errChan chan error, em *ebpf.Map) {
 
 				copy(actualBuffer[VXLANHeaderSize:], record.RawSample[36:36+rawSampleSize])
 				ethernetFrame := actualBuffer
-				// // m.logger.Printf("send packet to UDP, the size of payload is: %d", len(ethernetFrame))
-				_, err := m.child.(*MContainerProbe).MTCProbe.UDP_conn.Write(ethernetFrame)
-				// conn.Write(ethernetFrame)
+				_, err := m.child.(*MContainerProbe).UDP_conn.Write(ethernetFrame)
 				vxlanBufferPool.Put(buffer)
 				if err != nil {
 					log.Println("Write to UDP failed: ", err, "the size of packetBytes is: ", len(ethernetFrame))
