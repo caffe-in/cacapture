@@ -40,16 +40,15 @@ func (m *MContainerProbe) setupManagerPcap() error {
 	var probes []*manager.Probe
 	var podNetworksMap map[string]*PodNetworkInfo = make(map[string]*PodNetworkInfo)
 
-	config, err := clientcmd.BuildConfigFromFlags("", "/etc/kubernetes/kubelet.conf")
-	if err != nil {
-		m.logger.Println("cannot find the kubernetes conf in this node ", err)
-	}
-
 	var podNameList = m.conf.GetPodName()
 
 	if m.conf.GetMode() == "Containerd" {
 		// don't set the pid for the any container in pod, but give the pod name
 		// search the first net device which is not the lo
+		config, err := clientcmd.BuildConfigFromFlags("", "/etc/kubernetes/kubelet.conf")
+		if err != nil {
+			m.logger.Println("cannot find the kubernetes conf in this node ", err)
+		}
 
 		conn, err := grpc.Dial("unix:///run/containerd/containerd.sock", grpc.WithInsecure(), grpc.WithBlock())
 		if err != nil {
@@ -187,6 +186,11 @@ func (m *MContainerProbe) setupManagerPcap() error {
 		}
 
 	}
+	probes = append(probes, &manager.Probe{
+		Section:          "kprobe/security_socket_connect",
+		EbpfFuncName:     "kprobe__security_socket_connect",
+		AttachToFuncName: "security_socket_connect",
+	})
 
 	m.sslBpfFile = "tc.o" // assinged by caffein
 

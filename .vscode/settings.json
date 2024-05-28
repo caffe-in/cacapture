@@ -3,6 +3,7 @@
         "bpf_tracing.h": "c",
         "bpf_core_read.h": "c",
         "perf_event.h": "c",
-        "unistd.h": "c"
+        "unistd.h": "c",
+        "bpf_helpers.h": "c"
     }
 }

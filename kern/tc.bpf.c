@@ -19,7 +19,10 @@
 #include "common.h"
 #include <bpf/bpf_helpers.h>
 #define PT_REGS_PARM1(x) ((x)->di)
+#define PT_REGS_PARM2(x) ((x)->si)
+#define PT_REGS_PARM3(x) ((x)->dx)
 #define TC_PACKET_MIN_SIZE 36
+#define ARGS_BUF_SIZE 32000
 #define SOCKET_ALLOW 1
 #define READ_KERN(ptr)                                                  \
     ({                                                                  \
@@ -38,7 +41,29 @@ struct skb_data_event_t {
     u32 ifindex;
 };
 
+struct net_id_t {
+    u32 protocol;
+    u32 src_port;
+    u32 src_ip4;
+    u32 dst_port;
+    u32 dst_ip4;
+//    u32 src_ip6[4];
+//    u32 dst_ip6[4];
+};
 
+struct net_ctx_t {
+    u32 pid;
+    char comm[TASK_COMM_LEN];
+//    u8 cmdline[PATH_MAX_LEN];
+};
+typedef struct args_buffer {
+    u8 argnum;
+    char args[ARGS_BUF_SIZE];
+    u32 offset;
+} args_buffer_t;
+typedef struct syscall_event_data{
+    args_buffer_t args_buf;
+}
 
 ////////////////////// ebpf maps //////////////////////
 struct {
@@ -47,6 +72,13 @@ struct {
     __uint(value_size, sizeof(u32));
     __uint(max_entries, 10240);
 } skb_events SEC(".maps");
+
+struct events {
+    __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
+    __uint(max_entries, 1024);
+    __type(key, s32);
+    __type(value, u32);
+} syscall_events SEC(".maps");
 
 struct {
     __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
@@ -108,13 +140,12 @@ static __always_inline bool skb_revalidate_data(struct __sk_buff *skb,
 ///////////////////// ebpf functions //////////////////////
 static __always_inline int capture_packets(struct __sk_buff *skb, bool is_ingress) {
     // packet data
-    // bpf_printk("hello caffe,capture the message from container head");
     unsigned char *data_start = (void *)(long)skb->data;
     unsigned char *data_end = (void *)(long)skb->data_end;
     if (data_start + sizeof(struct ethhdr) > data_end) {
         return TC_ACT_OK;
     }
-    // bpf_trace_printk("capture_packets\n", sizeof("capture_packets\n"));
+    bpf_printk("capture_packets\n", sizeof("capture_packets\n"));
     u32 data_len = (u32)skb->len;
     uint32_t l4_hdr_off;
 
@@ -150,7 +181,7 @@ static __always_inline int capture_packets(struct __sk_buff *skb, bool is_ingres
     conn_id.src_ip4 = iph->saddr;
     conn_id.dst_ip4 = iph->daddr;
 
-
+    struct skb_data_event_t event={0};
     event.ts = bpf_ktime_get_ns();
     event.len = skb->len;
     event.ifindex = skb->ifindex;
@@ -170,6 +201,35 @@ static __always_inline int capture_packets(struct __sk_buff *skb, bool is_ingres
     // bpf_printk("the protocol is %d\n", conn_id.protocol);
     return TC_ACT_OK;
 }
+statfunc int save_to_submit_buf(args_buffer_t *buf, void *ptr, u32 size, u8 index)
+{
+    // Data saved to submit buf: [index][ ... buffer[size] ... ]
+
+    if (size == 0)
+        return 0;
+
+    barrier();
+    if (buf->offset > ARGS_BUF_SIZE - 1)
+        return 0;
+
+    // Save argument index
+    buf->args[buf->offset] = index;
+
+    // Satisfy verifier
+    if (buf->offset > ARGS_BUF_SIZE - (MAX_ELEMENT_SIZE + 1))
+        return 0;
+
+    // Read into buffer
+    if (bpf_probe_read(&(buf->args[buf->offset + 1]), size, ptr) == 0) {
+        // We update offset only if all writes were successful
+        buf->offset += size + 1;
+        buf->argnum++;
+        return 1;
+    }
+
+    return 0;
+}
+
 
 // egress_cls_func is called for packets that are going out of the network
 SEC("classifier")
@@ -181,4 +241,55 @@ int egress_cls_func(struct __sk_buff *skb) {
 SEC("classifier")
 int ingress_cls_func(struct __sk_buff *skb) {
     return capture_packets(skb, true);
+    
 };
+SEC("kprobe/security_socket_connect")
+int kprobe__security_socket_connect(struct pt_regs *ctx) {
+    syscall_events se = {};
+
+    struct socket *sock = (struct socket *)PT_REGS_PARM1(ctx);
+    if (!sock) {
+        return 0;
+    }
+    struct sockaddr *address = (struct sockaddr *)PT_REGS_PARM2(ctx);
+    if (!address) {
+        return 0;
+    }
+    u32 addrlen = PT_REGS_PARM3(ctx);
+    if (!addrlen) {
+        return 0;
+    }
+
+    int (*stsb)(args_buffer_t *, void *, u32, u8) = save_to_submit_buf;
+    void* args_buf = &syscall_events->args_buf;
+    
+
+
+    // 打印 Socket 描述符
+    // bpf_printk("Socket fd: %d\\n", sock->file->f_u.fu_fd);
+
+    // 打印地址长度
+    bpf_printk("Address length: %d\\n", addrlen);
+
+    // 根据地址族打印不同类型的地址信息
+    u16 family;
+    bpf_probe_read(&family, sizeof(family), &address->sa_family);
+    if (family == AF_INET) {
+        struct sockaddr_in addr_in;
+        bpf_probe_read(&addr_in, sizeof(addr_in), address);
+        bpf_printk("IPv4 address: %pI4\\n", &addr_in.sin_addr);
+        u16 port = bpf_ntohs(addr_in.sin_port);
+        bpf_printk("Port: %d\\n", port);
+    } else if (family == AF_INET6) {
+        struct sockaddr_in6 addr_in6;
+        bpf_probe_read(&addr_in6, sizeof(addr_in6), address);
+        bpf_printk("IPv6 address: %pI6\\n", &addr_in6.sin6_addr);
+        u16 port = bpf_ntohs(addr_in6.sin6_port);
+        bpf_printk("Port: %d\\n", port);
+    } else {
+        bpf_printk("Unsupported address family: %d\\n", family);
+    }
+
+    return 0;
+}
+

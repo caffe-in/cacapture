@@ -9,7 +9,6 @@ import (
 	"math"
 	"net"
 	"os"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -21,7 +20,7 @@ import (
 
 const CACAPTUREMagic = 0xCC0C4CFC
 
-const BufferPacketNum = 4000
+const BufferPacketNum = 8000
 
 const VXLANHeaderSize = 8
 
@@ -110,9 +109,10 @@ func (t *MTCProbe) writePacket(dataLen uint32, timeStamp time.Time, packetBytes 
 	defer t.tcPacketLocker.Unlock()
 	t.tcPackets = append(t.tcPackets, packet)
 	if len(t.tcPackets) >= BufferPacketNum {
-		sort.Slice(t.tcPackets, func(i, j int) bool {
-			return t.tcPackets[i].info.Timestamp.Before(t.tcPackets[j].info.Timestamp)
-		})
+		// multi thread process the tcPackets
+		// sort.Slice(t.tcPackets, func(i, j int) bool {
+		// 	return t.tcPackets[i].info.Timestamp.Before(t.tcPackets[j].info.Timestamp)
+		// })
 		i, err := t.savePcapng()
 		if err != nil {
 			return err

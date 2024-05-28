@@ -30,6 +30,7 @@ func (te *TcSkbEvent) SetPayload(payload []byte) {
 func (te *TcSkbEvent) Decode(payload []byte) (err error) {
 	// buf := bytes.NewBuffer(payload)
 	reader := bytes.NewReader(payload)
+	// to combine the process, but we don't need these now
 	if err = binary.Read(reader, binary.LittleEndian, &te.Ts); err != nil {
 		return
 	}
@@ -43,18 +44,18 @@ func (te *TcSkbEvent) Decode(payload []byte) (err error) {
 	//	return
 	//}
 	//TODO
-	te.Cmdline[0] = 91 //ascii 91
+	// te.Cmdline[0] = 91 //ascii 91
+	// offset := int64(8 + 4 + TaskCommLen)
+	// if _, err := reader.Seek(offset, io.SeekStart); err != nil {
+	// 	return err
+	// }
 	if err = binary.Read(reader, binary.LittleEndian, &te.Len); err != nil {
 		return
 	}
-	if err = binary.Read(reader, binary.LittleEndian, &te.Ifindex); err != nil {
-		return
-	}
-	// tmpData := make([]byte, te.Len)
-	// if err = binary.Read(reader, binary.LittleEndian, &tmpData); err != nil {
+	// if err = binary.Read(reader, binary.LittleEndian, &te.Ifindex); err != nil {
 	// 	return
 	// }
-	// te.payload = tmpData
+
 	if int(reader.Len()) < int(te.Len) {
 		return errors.New("payload is too short to contain the expected data")
 	}

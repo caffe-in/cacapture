@@ -16,8 +16,8 @@
             "args": [
 
                 "--Mode","Docker",
-                "--ContainerID","0f550e104309",
-                "--Sentnet"
+                "--ContainerID","9659b0ad9aea",
+                "--PcapFile","capture_msg/test.pcapng"
             ],
          }
     ]
