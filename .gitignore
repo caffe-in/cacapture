@@ -1,5 +1,6 @@
 *.pcapng
 *.data
 *.data.old
-capture_msg/
+capture_msg/*
 cacapture
+tc.o
