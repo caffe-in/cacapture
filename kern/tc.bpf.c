@@ -17,7 +17,11 @@
 #include "bpf_tracing.h"
 #include "vmlinux.h"
 #include "common.h"
+#include "maps.h"
+#include "context.h"
 #include <bpf/bpf_helpers.h>
+#include "kconfig.h"
+#include <bpf/bpf_core_read.h>
 #define PT_REGS_PARM1(x) ((x)->di)
 #define PT_REGS_PARM2(x) ((x)->si)
 #define PT_REGS_PARM3(x) ((x)->dx)
@@ -56,14 +60,7 @@ struct net_ctx_t {
     char comm[TASK_COMM_LEN];
 //    u8 cmdline[PATH_MAX_LEN];
 };
-typedef struct args_buffer {
-    u8 argnum;
-    char args[ARGS_BUF_SIZE];
-    u32 offset;
-} args_buffer_t;
-typedef struct syscall_event_data{
-    args_buffer_t args_buf;
-}
+
 
 ////////////////////// ebpf maps //////////////////////
 struct {
@@ -243,53 +240,124 @@ int ingress_cls_func(struct __sk_buff *skb) {
     return capture_packets(skb, true);
     
 };
-SEC("kprobe/security_socket_connect")
-int kprobe__security_socket_connect(struct pt_regs *ctx) {
-    syscall_events se = {};
 
-    struct socket *sock = (struct socket *)PT_REGS_PARM1(ctx);
-    if (!sock) {
-        return 0;
-    }
-    struct sockaddr *address = (struct sockaddr *)PT_REGS_PARM2(ctx);
-    if (!address) {
-        return 0;
-    }
-    u32 addrlen = PT_REGS_PARM3(ctx);
-    if (!addrlen) {
-        return 0;
-    }
-
-    int (*stsb)(args_buffer_t *, void *, u32, u8) = save_to_submit_buf;
-    void* args_buf = &syscall_events->args_buf;
-    
-
-
-    // 打印 Socket 描述符
-    // bpf_printk("Socket fd: %d\\n", sock->file->f_u.fu_fd);
-
-    // 打印地址长度
-    bpf_printk("Address length: %d\\n", addrlen);
-
-    // 根据地址族打印不同类型的地址信息
-    u16 family;
-    bpf_probe_read(&family, sizeof(family), &address->sa_family);
-    if (family == AF_INET) {
-        struct sockaddr_in addr_in;
-        bpf_probe_read(&addr_in, sizeof(addr_in), address);
-        bpf_printk("IPv4 address: %pI4\\n", &addr_in.sin_addr);
-        u16 port = bpf_ntohs(addr_in.sin_port);
-        bpf_printk("Port: %d\\n", port);
-    } else if (family == AF_INET6) {
-        struct sockaddr_in6 addr_in6;
-        bpf_probe_read(&addr_in6, sizeof(addr_in6), address);
-        bpf_printk("IPv6 address: %pI6\\n", &addr_in6.sin6_addr);
-        u16 port = bpf_ntohs(addr_in6.sin6_port);
-        bpf_printk("Port: %d\\n", port);
-    } else {
-        bpf_printk("Unsupported address family: %d\\n", family);
-    }
-
+SEC("raw_tracepoint/sys_enter")
+int tracepoint__raw_syscalls__sys_enter(struct bpf_raw_tracepoint_args *ctx)
+{
+    struct task_struct *task = (struct task_struct *) bpf_get_current_task();
+    int id = ctx->args[1];
+    bpf_tail_call(ctx, &sys_enter_init_tail, id);
     return 0;
 }
 
+SEC("raw_tracepoint/sys_enter_init")
+int sys_enter_init(struct bpf_raw_tracepoint_args *ctx)
+{
+    struct task_struct *task = (struct task_struct *) bpf_get_current_task();
+
+    u64 pid_tgid = bpf_get_current_pid_tgid();
+    u32 tid = pid_tgid;
+    task_info_t *task_info = bpf_map_lookup_elem(&task_info_map, &tid);
+    if (unlikely(task_info == NULL)) {
+        task_info = init_task_info(tid, 0);
+        if (unlikely(task_info == NULL))
+            return 0;
+
+        int zero = 0;
+        config_entry_t *config = bpf_map_lookup_elem(&config_map, &zero);
+        if (unlikely(config == NULL))
+            return 0;
+
+        init_task_context(&task_info->context, task, config->options);
+    }
+
+    syscall_data_t *sys = &(task_info->syscall_data);
+    sys->id = ctx->args[1];
+
+    if (get_kconfig(ARCH_HAS_SYSCALL_WRAPPER)) {
+        struct pt_regs *regs = (struct pt_regs *) ctx->args[0];
+
+        if (is_x86_compat(task)) {
+#if defined(bpf_target_x86)
+            sys->args.args[0] = BPF_CORE_READ(regs, bx);
+            sys->args.args[1] = BPF_CORE_READ(regs, cx);
+            sys->args.args[2] = BPF_CORE_READ(regs, dx);
+            sys->args.args[3] = BPF_CORE_READ(regs, si);
+            sys->args.args[4] = BPF_CORE_READ(regs, di);
+            sys->args.args[5] = BPF_CORE_READ(regs, bp);
+#endif // bpf_target_x86
+        } else {
+            sys->args.args[0] = PT_REGS_PARM1_CORE_SYSCALL(regs);
+            sys->args.args[1] = PT_REGS_PARM2_CORE_SYSCALL(regs);
+            sys->args.args[2] = PT_REGS_PARM3_CORE_SYSCALL(regs);
+            sys->args.args[3] = PT_REGS_PARM4_CORE_SYSCALL(regs);
+            sys->args.args[4] = PT_REGS_PARM5_CORE_SYSCALL(regs);
+            sys->args.args[5] = PT_REGS_PARM6_CORE_SYSCALL(regs);
+        }
+    } else {
+        bpf_probe_read(sys->args.args, sizeof(6 * sizeof(u64)), (void *) ctx->args);
+    }
+
+    if (is_compat(task)) {
+        // Translate 32bit syscalls to 64bit syscalls, so we can send to the correct handler
+        u32 *id_64 = bpf_map_lookup_elem(&sys_32_to_64_map, &sys->id);
+        if (id_64 == 0)
+            return 0;
+
+        sys->id = *id_64;
+    }
+
+    // exit, exit_group and rt_sigreturn syscalls don't return
+    if (sys->id != SYSCALL_EXIT && sys->id != SYSCALL_EXIT_GROUP &&
+        sys->id != SYSCALL_RT_SIGRETURN) {
+        sys->ts = bpf_ktime_get_ns();
+        task_info->syscall_traced = true;
+    }
+
+    // if id is irrelevant continue to next tail call
+    bpf_tail_call(ctx, &sys_enter_submit_tail, sys->id);
+
+    // call syscall handler, if exists
+    bpf_tail_call(ctx, &sys_enter_tails, sys->id);
+    return 0;
+}
+SEC("raw_tracepoint/sys_enter_submit")
+int sys_enter_submit(struct bpf_raw_tracepoint_args *ctx)
+{
+    program_data_t p = {};
+    if (!init_program_data(&p, ctx, NO_EVENT_SUBMIT))
+        return 0;
+
+    syscall_data_t *sys = &p.task_info->syscall_data;
+
+    if (!reset_event(p.event, sys->id))
+        return 0;
+
+    if (!evaluate_scope_filters(&p))
+        goto out;
+
+    if (p.config->options & OPT_TRANSLATE_FD_FILEPATH && has_syscall_fd_arg(sys->id)) {
+        // Process filepath related to fd argument
+        uint fd_num = get_syscall_fd_num_from_arg(sys->id, &sys->args);
+        struct file *f = get_struct_file_from_fd(fd_num);
+
+        if (f) {
+            u64 ts = sys->ts;
+            fd_arg_path_t fd_arg_path = {};
+            void *file_path = get_path_str(__builtin_preserve_access_index(&f->f_path));
+
+            bpf_probe_read_kernel_str(&fd_arg_path.path, sizeof(fd_arg_path.path), file_path);
+            bpf_map_update_elem(&fd_arg_path_map, &ts, &fd_arg_path, BPF_ANY);
+        }
+    }
+
+    if (sys->id != SYSCALL_RT_SIGRETURN && !p.task_info->syscall_traced) {
+        save_to_submit_buf(&p.event->args_buf, (void *) &(sys->args.args[0]), sizeof(int), 0);
+        events_perf_submit(&p, 0);
+    }
+
+out:
+    // call syscall handler, if exists
+    bpf_tail_call(ctx, &sys_enter_tails, sys->id);
+    return 0;
+}
