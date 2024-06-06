@@ -27,7 +27,7 @@
 #define sk_daddr          __sk_common.skc_daddr
 #define sk_rcv_saddr      __sk_common.skc_rcv_saddr
 #define sk_family         __sk_common.skc_family
-#define sk_state          __sk_common.skc_state
+// #define sk_state          __sk_common.skc_state
 #define sk_reuse          __sk_common.skc_reuse
 #define sk_reuseport      __sk_common.skc_reuseport
 #define sk_ipv6only       __sk_common.skc_ipv6only

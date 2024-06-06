@@ -5,6 +5,8 @@
 #include "include/socket_trace.h"
 #include "include/socket_trace_common.h"
 
+#define PROTO_INFER_CACHE_SIZE  80
+
 struct sys_enter_init_tail {
     __uint(type, BPF_MAP_TYPE_PROG_ARRAY);
     __uint(max_entries, MAX_EVENT_ID);
@@ -69,3 +71,18 @@ MAP_PERARRAY(members_offset, __u32, struct member_fields_offset, 1)
 MAP_PERARRAY(ctx_info, __u32, struct ctx_info_s, 1)
 
 MAP_ARRAY(kprobe_port_bitmap, __u32, struct kprobe_port_bitmap, 2)
+
+MAP_PERARRAY(trace_conf_map, __u32, struct trace_conf_t, 1)
+
+MAP_ARRAY(protocol_filter, int, int, PROTO_NUM)
+
+MAP_ARRAY(proto_ports_bitmap, __u32, ports_bitmap_t, PROTO_NUM)
+
+MAP_ARRAY(proto_infer_cache_map, __u32, struct proto_infer_cache_t, PROTO_INFER_CACHE_SIZE)
+
+MAP_PROG_ARRAY(progs_jmp_kp_map, __u32, __u32, PROG_KP_NUM)
+MAP_PROG_ARRAY(progs_jmp_tp_map, __u32, __u32, PROG_TP_NUM)
+
+MAP_PERARRAY(data_buf, __u32, struct __socket_data_buffer, 1)
+
+MAP_PERF_EVENT(socket_data, int, __u32, MAX_CPU)

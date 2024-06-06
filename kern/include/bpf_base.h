@@ -10,8 +10,15 @@
 #define static_always_inline static inline __attribute__ ((__always_inline__))
 #endif
 
+#define MAX_CPU         256
 #define NAME(N)  __##N
 
+#define PROGTP(F) SEC("prog/tp/"__stringify(F)) int bpf_prog_tp__##F
+#define PROGKP(F) SEC("prog/kp/"__stringify(F)) int bpf_prog_kp__##F
+#define KRETPROG(F) SEC("kretprobe/"__stringify(F)) int kretprobe__##F
+#define KPROG(F) SEC("kprobe/"__stringify(F)) int kprobe__##F
+#define TPPROG(F) SEC("tracepoint/syscalls/"__stringify(F)) int bpf_func_##F
+#define TP_SCHED_PROG(F) SEC("tracepoint/sched/"__stringify(F)) int bpf_func_##F
 #define __BPF_MAP_DEF(_kt, _vt, _ents) \
 	.key_size = sizeof(_kt),       \
 	.value_size = sizeof(_vt),     \
@@ -88,3 +95,18 @@ static_always_inline __attribute__((unused)) int name ## __delete(key_type *key)
 
 #define BPF_HASH(...) \
   BPF_HASHX(__VA_ARGS__, BPF_HASH4, BPF_HASH3)(__VA_ARGS__)
+
+
+#define MAP_PROG_ARRAY(name, key_type, value_type, max_entries) \
+struct bpf_map_def SEC("maps") __ ## name = \
+{   \
+    .type = BPF_MAP_TYPE_PROG_ARRAY, \
+    __BPF_MAP_DEF(key_type, value_type, max_entries), \
+};
+
+#define MAP_PERF_EVENT(name, key_type, value_type, max_entries) \
+struct bpf_map_def SEC("maps") __ ## name = \
+{   \
+    .type = BPF_MAP_TYPE_PERF_EVENT_ARRAY, \
+    __BPF_MAP_DEF(key_type, value_type, max_entries), \
+};

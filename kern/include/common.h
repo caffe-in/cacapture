@@ -80,6 +80,9 @@ enum traffic_direction {
 	T_EGRESS,
 	T_INGRESS,
 };
+
+#ifndef TRAFFIC_PROTOCOL
+	#define TRAFFIC_PROTOCOL
 // 数据协议
 enum traffic_protocol {
 	PROTO_UNKNOWN = 0,
@@ -107,6 +110,7 @@ enum traffic_protocol {
 	PROTO_CUSTOM = 127,
 	PROTO_NUM = 130
 };
+#endif
 enum syscall_src_func {
 	SYSCALL_FUNC_UNKNOWN,
 	SYSCALL_FUNC_WRITE,
@@ -132,6 +136,8 @@ enum process_data_extra_source {
 	DATA_SOURCE_GO_HTTP2_DATAFRAME_UPROBE,
 	DATA_SOURCE_CLOSE,
 };
+#ifndef MESSAGE_TYPE
+	#define MESSAGE_TYPE
 enum message_type {
 	MSG_UNKNOWN,
 	// L7协议推断数据类型是请求
@@ -159,10 +165,26 @@ enum message_type {
 	// 用于信息相关清理，一般用于socket信息清除
 	MSG_CLEAR
 };
+#endif
 
 struct protocol_message_t {
 	enum traffic_protocol protocol;
 	enum message_type type;
+};
+
+enum {
+	PROG_PROTO_INFER_TP_IDX,
+	PROG_DATA_SUBMIT_TP_IDX,
+	PROG_OUTPUT_DATA_TP_IDX,
+	PROG_IO_EVENT_TP_IDX,
+	PROG_TP_NUM
+};
+
+enum {
+	PROG_PROTO_INFER_KP_IDX,
+	PROG_DATA_SUBMIT_KP_IDX,
+	PROG_OUTPUT_DATA_KP_IDX,
+	PROG_KP_NUM
 };
 
 

@@ -225,3 +225,14 @@ struct tail_calls_context {
 	__u32 bytes_count;
 	struct member_fields_offset *offset;
 };
+
+typedef struct kprobe_port_bitmap ports_bitmap_t;
+
+// Protocol inference fast cache structure
+struct proto_infer_cache_t {
+	/*
+	 * The lower 16 bits of the process-ID/thread-ID
+	 * are used as the index and correspond to the protocol type.
+	 */
+	__u8 protocols[65536];
+};
