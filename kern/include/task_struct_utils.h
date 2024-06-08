@@ -1,4 +1,8 @@
-#include <vmlinux.h>
+
+#ifndef DF_TASK_STRUCT_UTILS_H
+#define DF_TASK_STRUCT_UTILS_H
+
+#include "vmlinux.h"
 #include <bpf/bpf_core_read.h>
 #include <bpf/bpf_helpers.h>
 #include "common.h"
@@ -69,3 +73,5 @@ static __inline void *get_socket_from_fd(int fd_num,
 
 	return NULL;
 }
+
+#endif

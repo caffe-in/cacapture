@@ -1,5 +1,10 @@
-#include <vmlinux.h>
+
+#ifndef DF_BPF_SOCKET_TRACE_COMMON_H
+#define DF_BPF_SOCKET_TRACE_COMMON_H
+#include "vmlinux.h"
 #include "common.h"
+
+#define BURST_DATA_BUF_SIZE  16384	// For brust send buffer
 struct socket_info_s {
 	__u16 l7_proto;
 
@@ -128,3 +133,13 @@ struct __socket_data {
 	__u8  socket_role;   // this message is created by: 0:unkonwn 1:client(connect) 2:server(accept)
 	char data[BURST_DATA_BUF_SIZE];
 } __attribute__((packed));
+
+struct trace_info_t {
+	__u8  reserve;
+	__u32 update_time; // 从系统开机开始到创建/更新时的间隔时间单位是秒
+	__u32 peer_fd;	   // 用于socket之间的关联
+	__u64 thread_trace_id; // 线程追踪ID
+	__u64 socket_id; // Records the socket associated when tracing was created (记录创建追踪时关联的socket)
+} __attribute__((packed));
+
+#endif

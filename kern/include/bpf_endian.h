@@ -18,9 +18,11 @@
  *
  * SPDX-License-Identifier: GPL-2.0
  */
-#include <vmlinux.h>
+
 #ifndef DF_BPF_ENDIAN
 #define DF_BPF_ENDIAN
+
+#include "vmlinux.h"
 
 
 #if (__BYTE_ORDER__) == ( __ORDER_LITTLE_ENDIAN__)

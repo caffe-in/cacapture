@@ -1,18 +1,20 @@
-#include <vmlinux.h>
+#include "vmlinux.h"
 #include <bpf/bpf_core_read.h>
 #include <bpf/bpf_helpers.h>
 #include "include/socket_trace.h"
 #include "maps.h"
-#include "common.h"
+#include "include/common.h"
 #include "vmlinux_missing.h"
 #include "include/bpf_endian.h"
 #include "include/bpf_base.h"
 #include "include/utils.h"
 #include "include/protocol_inference.h"
+#include "include/task_struct_utils.h"
 
 #define SUBMIT_OK (0)
 #define SUBMIT_INVALID (-1)
 #define SUBMIT_ABORT (-2)
+#define CAP_DATA_SIZE 1024		// For no-brust send buffer
 
 #define NS_PER_US 1000ULL
 #define NS_PER_SEC 1000000000ULL
@@ -29,6 +31,9 @@
 		if (__feature == 0xffff0000)                                 \
 			f = PF_INET;                                             \
 	} while (0)
+
+
+static inline int proggtp_data_submit(void *ctx);
 static __inline void get_sock_flags(void *sk,
 									struct member_fields_offset *offset,
 									struct conn_info_s *conn_info)
@@ -116,6 +121,71 @@ static __inline int is_tcp_udp_data(void *sk,
 
 	conn_info->tuple.l4_protocol = IPPROTO_TCP;
 	return SOCK_CHECK_TYPE_TCP_ES;
+}
+
+#define COPY_IOV(B, O, I, L_T, L_C, F, F_S) do {				\
+	struct iovec iov_cpy;							\
+	bpf_probe_read_user(&iov_cpy, sizeof(struct iovec), (I));		\
+	if (iov_cpy.iov_base == NULL || iov_cpy.iov_len == 0) continue;		\
+	if (!(F)) {								\
+		F = iov_cpy.iov_base;						\
+		F_S = iov_cpy.iov_len;						\
+	}									\
+	const int bytes_remaining = (L_T) - (L_C);				\
+	__u32 iov_size =							\
+		iov_cpy.iov_len <						\
+			bytes_remaining ? iov_cpy.iov_len : bytes_remaining;	\
+	__u32 len = (O) + (L_C);						\
+	struct copy_data_s *cp = (struct copy_data_s *)((B) + len);		\
+	if (len > (sizeof((B)) - sizeof(*cp)))					\
+		break;								\
+	if (iov_size >= sizeof(cp->data)) {					\
+		bpf_probe_read_user(cp->data, sizeof(cp->data), iov_cpy.iov_base);\
+		iov_size = sizeof(cp->data);					\
+	} else {								\
+		iov_size = iov_size & (sizeof(cp->data) - 1);			\
+		bpf_probe_read_user(cp->data, iov_size + 1, iov_cpy.iov_base);	\
+	}									\
+	L_C = (L_C) + iov_size;							\
+} while (0)
+/* *INDENT-ON* */
+
+static __inline int iovecs_copy(struct __socket_data *v,
+				struct __socket_data_buffer *v_buff,
+				const struct data_args_t *args,
+				size_t syscall_len, __u32 send_len)
+{
+#define LOOP_LIMIT 12
+
+	struct copy_data_s {
+		char data[CAP_DATA_SIZE];
+	};
+
+	int bytes_copy = 0;
+	__u32 total_size = 0;
+
+	if (syscall_len >= sizeof(v->data))
+		total_size = sizeof(v->data);
+	else
+		total_size = send_len;
+
+	if (total_size > syscall_len)
+		total_size = syscall_len;
+
+	char *first_iov = NULL;
+	__u32 first_iov_size = 0;
+
+#pragma unroll
+	for (unsigned int i = 0;
+	     i < LOOP_LIMIT && i < args->iovlen && bytes_copy < total_size;
+	     ++i) {
+		COPY_IOV(v_buff->data,
+			 v_buff->len + offsetof(typeof(struct __socket_data),
+						data), &args->iov[i],
+			 total_size, bytes_copy, first_iov, first_iov_size);
+	}
+
+	return bytes_copy;
 }
 
 static __inline void init_conn_info(__u32 tgid, __u32 fd,
@@ -225,6 +295,48 @@ static __inline int infer_iovecs_copy(struct infer_data_s *infer_buf,
 
 	return bytes_copy;
 }
+
+static __inline bool get_socket_info(struct __socket_data *v, void *sk,
+				     struct conn_info_s *conn_info)
+{
+	if (v == NULL || sk == NULL)
+		return false;
+
+	unsigned int k0 = 0;
+	struct member_fields_offset *offset = members_offset__lookup(&k0);
+	if (!offset)
+		return false;
+	/*
+	 * Without thinking about PF_UNIX.
+	 */
+	switch (conn_info->skc_family) {
+	case PF_INET:
+		bpf_probe_read_kernel(v->tuple.rcv_saddr, 4,
+				      sk + offset->struct_sock_saddr_offset);
+		bpf_probe_read_kernel(v->tuple.daddr, 4,
+				      sk + offset->struct_sock_daddr_offset);
+		v->tuple.addr_len = 4;
+		break;
+	case PF_INET6:
+		if (sk + offset->struct_sock_ip6saddr_offset >= 0) {
+			bpf_probe_read_kernel(v->tuple.rcv_saddr, 16,
+					      sk +
+					      offset->struct_sock_ip6saddr_offset);
+		}
+		if (sk + offset->struct_sock_ip6daddr_offset >= 0) {
+			bpf_probe_read_kernel(v->tuple.daddr, 16,
+					      sk +
+					      offset->struct_sock_ip6daddr_offset);
+		}
+		v->tuple.addr_len = 16;
+		break;
+	default:
+		return false;
+	}
+
+	return true;
+}
+
 
 static __inline int
 infer_l7_class(struct ctx_info_s *ctx,
@@ -354,13 +466,13 @@ static __inline void process_syscall_data(struct pt_regs *ctx, __u64 id,
 	};
 	if (!process_data(ctx, id, direction, args, bytes_count, &extra))
 	{
-		bpf_tail_call(ctx, &NAME(progs_jmp_tp_map),
-					  PROG_DATA_SUBMIT_TP_IDX);
+		proggtp_data_submit(ctx);
 	}
 	else
 	{
-		bpf_tail_call(ctx, &NAME(progs_jmp_tp_map),
-					  PROG_IO_EVENT_TP_IDX);
+		return;
+		// bpf_tail_call(ctx, &NAME(progs_jmp_tp_map),
+		// 			  PROG_IO_EVENT_TP_IDX);
 	}
 }
 
@@ -387,98 +499,20 @@ int bpf_func_sys_exit_write(struct syscall_comm_exit_ctx *ctx)
 {
 	__u64 id = bpf_get_current_pid_tgid();
 	ssize_t bytes_count = ctx->ret;
+	bpf_printk("start read write_args\n",sizeof("start read write_args"));
 	struct data_args_t *write_args = active_write_args_map__lookup(&id);
+	bpf_printk("end read write_args\n",sizeof("end read write_args"));
 	if (write_args != NULL && write_args->fd > 2)
 	{
 		write_args->bytes_count = bytes_count;
 		process_syscall_data((struct pt_regs *)ctx, id, T_EGRESS,
 							 write_args, bytes_count);
 	}
+	return 0;
 }
 
 //==============================================================================================
 
-SEC("prog/tp/__data_submit") int bpf_prog_tp__data_submit (void *ctx)
-{
-	int ret;
-	ret = data_submit(ctx);
-	if (ret == SUBMIT_OK)
-	{
-		bpf_tail_call(ctx, &NAME(progs_jmp_tp_map),
-					  PROG_OUTPUT_DATA_TP_IDX);
-	}
-	else if (ret == SUBMIT_ABORT)
-	{
-		return 0;
-	}
-	else
-	{
-		bpf_tail_call(ctx, &NAME(progs_jmp_tp_map),
-					  PROG_IO_EVENT_TP_IDX);
-	}
-
-	return 0;
-}
-
-SEC("prog/kp/__data_submit") int bpf_prog_kp__data_submit (void *ctx)
-{
-	int ret;
-	ret = data_submit(ctx);
-	if (ret == SUBMIT_OK)
-	{
-		bpf_tail_call(ctx, &NAME(progs_jmp_kp_map),
-					  PROG_OUTPUT_DATA_KP_IDX);
-	}
-	else if (ret == SUBMIT_ABORT)
-	{
-		return 0;
-	}
-	else
-	{
-		__u64 id = bpf_get_current_pid_tgid();
-		active_read_args_map__delete(&id);
-		active_write_args_map__delete(&id);
-	}
-
-	return 0;
-}
-static __inline int data_submit(void *ctx)
-{
-	int ret = 0;
-	__u32 k0 = 0;
-	struct ctx_info_s *ctx_map = bpf_map_lookup_elem(&NAME(ctx_info), &k0);
-	if (!ctx_map)
-		return SUBMIT_ABORT;
-
-	__u64 id = bpf_get_current_pid_tgid();
-	struct conn_info_s *conn_info;
-	struct conn_info_s __conn_info = ctx_map->tail_call.conn_info;
-	conn_info = &__conn_info;
-	__u64 conn_key = gen_conn_key_id(id >> 32, (__u64)conn_info->fd);
-	conn_info->socket_info_ptr = socket_info_map__lookup(&conn_key);
-	if (!conn_info->is_reasm_seg && conn_info->socket_info_ptr)
-		conn_info->socket_info_ptr->finish_reasm = false;
-
-	struct data_args_t *args;
-	if (conn_info->direction == T_INGRESS)
-		args = active_read_args_map__lookup(&id);
-	else
-		args = active_write_args_map__lookup(&id);
-
-	if (args == NULL)
-		return SUBMIT_ABORT;
-
-	const bool vecs = ctx_map->tail_call.extra.vecs;
-	__u32 bytes_count = ctx_map->tail_call.bytes_count;
-	struct member_fields_offset *offset = ctx_map->tail_call.offset;
-	__u64 enter_ts = args->enter_ts;
-	const struct process_data_extra extra = ctx_map->tail_call.extra;
-
-	ret = __data_submit(ctx, conn_info, args, vecs, bytes_count,
-						offset, enter_ts, &extra);
-
-	return ret;
-}
 
 static __inline struct trace_key_t get_trace_key(__u64 timeout,
 												 bool is_socket_io)
@@ -487,8 +521,9 @@ static __inline struct trace_key_t get_trace_key(__u64 timeout,
 	__u64 goid = 0;
 
 	if (timeout)
-	{
-		goid = get_rw_goid(timeout * NS_PER_SEC, is_socket_io);
+	{	
+		struct trace_key_t key = {};
+		return key;
 	}
 
 	struct trace_key_t key = {};
@@ -505,6 +540,153 @@ static __inline struct trace_key_t get_trace_key(__u64 timeout,
 	}
 
 	return key;
+}
+
+#define TRACE_MAP_ACT_NONE  0
+#define TRACE_MAP_ACT_NEW   1
+#define TRACE_MAP_ACT_DEL   2
+
+static __inline void trace_process(struct socket_info_s *socket_info_ptr,
+				   struct conn_info_s *conn_info,
+				   __u64 socket_id, __u64 pid_tgid,
+				   struct trace_info_t *trace_info_ptr,
+				   struct trace_conf_t *trace_conf,
+				   struct trace_stats *trace_stats,
+				   __u64 * thread_trace_id,
+				   __u64 time_stamp,
+				   struct trace_key_t *trace_key)
+{
+	/*
+	 * ==========================================
+	 * Thread-Trace-ID (Single Redirect Trace)
+	 * ==========================================
+	 *
+	 * Ingress              |                   | Egress
+	 * ----------------------------------------------------------
+	 *                   socket-a                |
+	 * trace start ID ①  -> |                    |
+	 *                      |                   socket-b
+	 *                      - same thread ID --- |
+	 *                                           | ①  -> trace end
+	 *                                           |
+	 *                                           |
+	 * ... ...
+	 *                   socket-n
+	 * trace start ID ② -> |                     |
+	 *                     |                    socket-m
+	 *                      - same thread ID --- |
+	 *                                           | ② -> trace end
+	 */
+
+	/*
+	 * 同方向多个连续请求或回应的场景：
+	 *
+	 *              Ingress |
+	 * ----------------------
+	 *                   socket-n
+	 *                ①  -> |
+	 *                ②  -> |
+	 *                ③  -> |
+	 *               ......
+	 *
+	 *
+	 *                      | Egress
+	 * -----------------------------
+	 *                   socket-m
+	 *                      | -> ①
+	 *                        ......
+	 * 采用的策略是：沿用上次trace_info保存的traceID。
+	 */
+
+	__u64 pre_trace_id = 0;
+	int ret;
+	if (is_socket_info_valid(socket_info_ptr) &&
+	    conn_info->direction == socket_info_ptr->direction) {
+		if (trace_info_ptr)
+			pre_trace_id = trace_info_ptr->thread_trace_id;
+	}
+
+	if (conn_info->direction == T_INGRESS) {
+		struct trace_info_t trace_info = { 0 };
+		*thread_trace_id = trace_info.thread_trace_id =
+		    (pre_trace_id ==
+		     0 ? ++trace_conf->thread_trace_id : pre_trace_id);
+		/*
+		 * For NGINX tracing, 'MSG_REQUEST' and 'MSG_RESPONSE' are used
+		 * as judgment conditions. After enabling data segment reassembly,
+		 * the reassembled segments are set to 'MSG_REQUEST'. Here, we need
+		 * to correct it so that only the beginning of the segment data can
+		 * be judged. It should be 'MSG_REASM_START', not is 'MSG_REASM_SEG'.
+		 */
+		if (conn_info->message_type == MSG_REQUEST &&
+		    !conn_info->is_reasm_seg)
+			trace_info.peer_fd = conn_info->fd;
+		else if (conn_info->message_type == MSG_RESPONSE) {
+			if (is_socket_info_valid(socket_info_ptr) &&
+			    socket_info_ptr->peer_fd != 0)
+				trace_info.peer_fd = socket_info_ptr->peer_fd;
+		}
+		trace_info.update_time = time_stamp / NS_PER_SEC;
+		trace_info.socket_id = socket_id;
+		ret = trace_map__update(trace_key, &trace_info);
+		if (!trace_info_ptr) {
+			if (ret == 0) {
+				__sync_fetch_and_add
+				    (&trace_stats->trace_map_count, 1);
+			}
+		}
+	} else {		/* direction == T_EGRESS */
+		if (trace_info_ptr) {
+			*thread_trace_id = trace_info_ptr->thread_trace_id;
+
+			/*
+			 * Retain tracking information without deletion. Mainly address
+			 * situations where MySQL 'kComStmtClose/kComStmtQuit' unilaterally
+			 * sends (client only requests without response) tracking being
+			 * severed.
+			 *
+			 * For example: (Mysql Client)
+			 * 
+			 * Request Type       Request TraceID   Response TraceID
+			 * -----------------------------------------------------
+			 * COM_STMT_EXECUTE   A                 B
+			 * COM_STMT_CLOSE     B                 0
+			 * COM_QUERY          B                 C
+			 *
+			 * Implement COM_QUERY with Request TraceID set to 'B' instead of '0'
+			 * to avoid interruption of tracing.
+			 */
+			if (conn_info->keep_trace)
+				return;
+
+			if (!trace_map__delete(trace_key)) {
+				__sync_fetch_and_add
+				    (&trace_stats->trace_map_count, -1);
+			}
+		}
+	}
+}
+
+static __inline bool is_proto_reasm_enabled(int protocol)
+{
+	bool *enabled = allow_reasm_protos_map__lookup(&protocol);
+	return (enabled) ? (*enabled) : false;
+}
+
+static __inline void delete_socket_info(__u64 conn_key,
+					struct socket_info_s *socket_info_ptr)
+{
+	if (socket_info_ptr == NULL)
+		return;
+
+	__u32 k0 = 0;
+	struct trace_stats *trace_stats = trace_stats_map__lookup(&k0);
+	if (trace_stats == NULL)
+		return;
+
+	if (!socket_info_map__delete(&conn_key)) {
+		__sync_fetch_and_add(&trace_stats->socket_map_count, -1);
+	}
 }
 static __inline int
 __data_submit(struct pt_regs *ctx, struct conn_info_s *conn_info,
@@ -827,14 +1009,43 @@ __data_submit(struct pt_regs *ctx, struct conn_info_s *conn_info,
 	return SUBMIT_OK;
 }
 
-SEC("prog/tp/__output_data") int bpf_prog_tp__output_data (void *ctx)
-{
-	return output_data_common(ctx);
-}
 
-SEC("prog/kp/__output_data") int bpf_prog_kp__output_data (void *ctx)
+static __inline int data_submit(void *ctx)
 {
-	return output_data_common(ctx);
+	int ret = 0;
+	__u32 k0 = 0;
+	struct ctx_info_s *ctx_map = bpf_map_lookup_elem(&NAME(ctx_info), &k0);
+	if (!ctx_map)
+		return SUBMIT_ABORT;
+
+	__u64 id = bpf_get_current_pid_tgid();
+	struct conn_info_s *conn_info;
+	struct conn_info_s __conn_info = ctx_map->tail_call.conn_info;
+	conn_info = &__conn_info;
+	__u64 conn_key = gen_conn_key_id(id >> 32, (__u64)conn_info->fd);
+	conn_info->socket_info_ptr = socket_info_map__lookup(&conn_key);
+	if (!conn_info->is_reasm_seg && conn_info->socket_info_ptr)
+		conn_info->socket_info_ptr->finish_reasm = false;
+
+	struct data_args_t *args;
+	if (conn_info->direction == T_INGRESS)
+		args = active_read_args_map__lookup(&id);
+	else
+		args = active_write_args_map__lookup(&id);
+
+	if (args == NULL)
+		return SUBMIT_ABORT;
+
+	const bool vecs = ctx_map->tail_call.extra.vecs;
+	__u32 bytes_count = ctx_map->tail_call.bytes_count;
+	struct member_fields_offset *offset = ctx_map->tail_call.offset;
+	__u64 enter_ts = args->enter_ts;
+	const struct process_data_extra extra = ctx_map->tail_call.extra;
+
+	ret = __data_submit(ctx, conn_info, args, vecs, bytes_count,
+						offset, enter_ts, &extra);
+
+	return ret;
 }
 
 /*
@@ -1024,3 +1235,70 @@ clear_args_map_2:
 	active_write_args_map__delete(&id);
 	return 0;
 }
+
+static inline progtp_output_data(void *ctx)
+{
+	return output_data_common(ctx);
+}
+static inline progkp_output_data(void *ctx)
+{
+	return output_data_common(ctx);
+}
+
+// caffein cann't solve the problem that how to find prog/tp in user go program, so we change bpf tail call to static inline function
+// PROGTP(output_data) (void *ctx) {
+// 	return output_data_common(ctx);
+// }
+
+// PROGKP(output_data) (void *ctx) {
+// 	return output_data_common(ctx);
+// }
+
+static inline proggtp_data_submit(void *ctx)
+{
+	int ret;
+	ret = data_submit(ctx);
+	if (ret == SUBMIT_OK)
+	{
+		progtp_output_data(ctx);
+	}
+	else if (ret == SUBMIT_ABORT)
+	{
+		return 0;
+	}
+	else
+	{
+		return 0;
+		// bpf_tail_call(ctx, &NAME(progs_jmp_tp_map),
+		// 			  PROG_IO_EVENT_TP_IDX);
+	}
+
+	return 0;
+}
+
+static inline progkp_data_submit(void *ctx)
+{
+	int ret;
+	ret = data_submit(ctx);
+	if (ret == SUBMIT_OK)
+	{
+		progkp_output_data(ctx);
+	}
+	else if (ret == SUBMIT_ABORT)
+	{
+		return 0;
+	}
+	else
+	{
+		__u64 id = bpf_get_current_pid_tgid();
+		active_read_args_map__delete(&id);
+		active_write_args_map__delete(&id);
+	}
+
+	return 0;
+}
+
+
+
+
+

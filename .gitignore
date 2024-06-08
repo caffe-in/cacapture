@@ -4,3 +4,4 @@
 capture_msg/*
 cacapture
 tc.o
+*.o

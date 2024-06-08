@@ -1,17 +1,22 @@
 
+#ifndef DF_BPF_BASE_H
+#define DF_BPF_BASE_H
 #include <linux/version.h>
-#include <asm/ptrace.h>
-#include <stdlib.h>
-#include <sys/types.h>
-#include <stdbool.h>
-#include <errno.h>
-#include <stddef.h>
+// #include <asm/ptrace.h>
+// #include <stdlib.h>
+// #include <sys/types.h>
+// #include <stdbool.h>
+// #include <errno.h>
+// #include <stddef.h>
 #ifndef static_always_inline
 #define static_always_inline static inline __attribute__ ((__always_inline__))
 #endif
 
 #define MAX_CPU         256
 #define NAME(N)  __##N
+
+#define __stringify_1(x) #x
+#define __stringify(x)  __stringify_1(x)
 
 #define PROGTP(F) SEC("prog/tp/"__stringify(F)) int bpf_prog_tp__##F
 #define PROGKP(F) SEC("prog/kp/"__stringify(F)) int bpf_prog_kp__##F
@@ -110,3 +115,24 @@ struct bpf_map_def SEC("maps") __ ## name = \
     .type = BPF_MAP_TYPE_PERF_EVENT_ARRAY, \
     __BPF_MAP_DEF(key_type, value_type, max_entries), \
 };
+
+#define MAP_PERARRAY(name, key_type, value_type, max_entries) \
+struct bpf_map_def SEC("maps") __##name = \
+{   \
+    .type = BPF_MAP_TYPE_PERCPU_ARRAY, \
+    __BPF_MAP_DEF(key_type, value_type, max_entries), \
+}; \
+static_always_inline __attribute__((unused)) value_type * name ## __lookup(key_type *key) \
+{ \
+    return (value_type *) bpf_map_lookup_elem(& __##name, (const void *)key); \
+} \
+static_always_inline __attribute__((unused)) int name ## __update(key_type *key, value_type *value) \
+{ \
+    return bpf_map_update_elem(& __##name, (const void *)key, (const void *)value, BPF_ANY); \
+} \
+static_always_inline __attribute__((unused)) int name ## __delete(key_type *key) \
+{ \
+    return bpf_map_delete_elem(& __##name, (const void *)key); \
+}
+
+#endif

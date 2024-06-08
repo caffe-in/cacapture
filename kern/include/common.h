@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#ifndef DF_BPF_COMMON_H
+#define DF_BPF_COMMON_H
 #include "vmlinux.h"
 #include "bpf/bpf_helpers.h"
 #ifndef CACAPTURE_COMMON_H
@@ -186,5 +188,6 @@ enum {
 	PROG_OUTPUT_DATA_KP_IDX,
 	PROG_KP_NUM
 };
+#endif
 
 

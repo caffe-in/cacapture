@@ -4,6 +4,7 @@
 #define BPF_MAX_LOG_FILE_LEN 72
 #define MAX_BIN_PATH_SIZE 256
 #define MAX_CACHED_PATH_SIZE 64
+#define ARGS_BUF_SIZE 32000
 enum bpf_log_level
 {
     BPF_LOG_LVL_DEBUG = -1,
@@ -161,11 +162,12 @@ typedef struct task_info {
     u8 container_state;  // the state of the container the task resides in
 } task_info_t;
 
-typedef union scratch {
-    bpf_log_output_t log_output;
-    proc_info_t proc_info;
-    task_info_t task_info;
-} scratch_t;
+typedef struct bpf_log {
+    s64 ret; // return value
+    u32 cpu;
+    u32 line;                        // line number
+    char file[BPF_MAX_LOG_FILE_LEN]; // filename
+} bpf_log_t;
 
 typedef struct bpf_log_output {
     enum bpf_log_id id; // type
@@ -175,12 +177,24 @@ typedef struct bpf_log_output {
     struct bpf_log log;
 } bpf_log_output_t;
 
-typedef struct bpf_log {
-    s64 ret; // return value
-    u32 cpu;
-    u32 line;                        // line number
-    char file[BPF_MAX_LOG_FILE_LEN]; // filename
-} bpf_log_t;
+typedef struct binary {
+    u32 mnt_id;
+    char path[MAX_BIN_PATH_SIZE];
+} binary_t;
+
+typedef struct file_id {
+    dev_t device;
+    unsigned long inode;
+    u64 ctime;
+} file_id_t;
+
+typedef struct file_info {
+    union {
+        char pathname[MAX_CACHED_PATH_SIZE];
+        char *pathname_p;
+    };
+    file_id_t id;
+} file_info_t;
 
 typedef struct proc_info {
     bool new_proc;        // set if this process was started after tracee. Used with new_pid filter
@@ -190,23 +204,12 @@ typedef struct proc_info {
     file_info_t interpreter;
 } proc_info_t;
 
-typedef struct binary {
-    u32 mnt_id;
-    char path[MAX_BIN_PATH_SIZE];
-} binary_t;
-typedef struct file_info {
-    union {
-        char pathname[MAX_CACHED_PATH_SIZE];
-        char *pathname_p;
-    };
-    file_id_t id;
-} file_info_t;
+typedef union scratch {
+    bpf_log_output_t log_output;
+    proc_info_t proc_info;
+    task_info_t task_info;
+} scratch_t;
 
-typedef struct file_id {
-    dev_t device;
-    unsigned long inode;
-    u64 ctime;
-} file_id_t;
 
 typedef struct policies_config {
     // enabled scopes bitmask per filter
@@ -254,23 +257,12 @@ typedef struct config_entry {
     policies_config_t policies_config;
 } config_entry_t;
 
-typedef struct program_data {
-    config_entry_t *config;
-    task_info_t *task_info;
-    proc_info_t *proc_info;
-    event_data_t *event;
-    u32 scratch_idx;
-    void *ctx;
-} program_data_t;
-
 typedef struct args_buffer {
     u8 argnum;
     char args[ARGS_BUF_SIZE];
     u32 offset;
 } args_buffer_t;
-typedef struct syscall_event_data{
-    args_buffer_t args_buf;
-}
+
 typedef struct event_context {
     u64 ts; // timestamp
     task_context_t task;
@@ -295,3 +287,33 @@ typedef struct event_data {
     event_config_t config;
     policies_config_t policies_config;
 } event_data_t;
+
+typedef struct program_data {
+    config_entry_t *config;
+    task_info_t *task_info;
+    proc_info_t *proc_info;
+    event_data_t *event;
+    u32 scratch_idx;
+    void *ctx;
+} program_data_t;
+
+typedef struct syscall_event_data{
+    args_buffer_t args_buf;
+};
+
+struct __io_event_buffer {
+	__u32 bytes_count;
+
+	// 0: write
+	// 1: read
+	__u32 operation;
+
+	// nanosecond
+	__u64 latency;
+
+	// strings terminated with \0
+	char filename[64];
+} __attribute__((packed));
+
+
+

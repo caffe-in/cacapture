@@ -1,4 +1,7 @@
-#include <vmlinux.h>
+
+#ifndef DF_BPF_SOCKET_TRACE_H
+#define DF_BPF_SOCKET_TRACE_H
+#include "vmlinux.h"
 #include "common.h"
 
 #define INFER_FINISH    0
@@ -96,7 +99,14 @@ struct member_fields_offset {
 	__u32 struct_sock_common_ipv6only_offset;	// offsetof(struct sock_common, skc_flags)
 
 };
-
+struct __tuple_t {
+	__u8 daddr[16];
+	__u8 rcv_saddr[16];
+	__u8 addr_len;
+	__u8 l4_protocol;
+	__u16 dport;
+	__u16 num;
+};
 struct conn_info_s {
 #ifdef PROBE_CONN
 	__u64 id;
@@ -175,14 +185,8 @@ struct conn_info_s {
 	struct socket_info_s *socket_info_ptr;	/* lookup __socket_info_map */
 };
 
-struct __tuple_t {
-	__u8 daddr[16];
-	__u8 rcv_saddr[16];
-	__u8 addr_len;
-	__u8 l4_protocol;
-	__u16 dport;
-	__u16 num;
-};
+
+
 
 static __inline __u64 gen_conn_key_id(__u64 param_1, __u64 param_2)
 {
@@ -193,14 +197,6 @@ static __inline __u64 gen_conn_key_id(__u64 param_1, __u64 param_2)
 	 */
 	return ((param_1 << 32) | (__u32) param_2);
 }
-
-struct ctx_info_s {
-	union {
-		struct infer_data_s infer_buf;
-		struct tail_calls_context tail_call;
-	};
-};
-
 struct infer_data_s {
 	__u32 len;
 	char data[DATA_BUF_MAX * 2];
@@ -225,6 +221,14 @@ struct tail_calls_context {
 	__u32 bytes_count;
 	struct member_fields_offset *offset;
 };
+struct ctx_info_s {
+	union {
+		struct infer_data_s infer_buf;
+		struct tail_calls_context tail_call;
+	};
+};
+
+
 
 typedef struct kprobe_port_bitmap ports_bitmap_t;
 
@@ -236,3 +240,5 @@ struct proto_infer_cache_t {
 	 */
 	__u8 protocols[65536];
 };
+
+#endif

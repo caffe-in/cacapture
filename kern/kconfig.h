@@ -1,7 +1,7 @@
 #ifndef __COMMON_KCONFIG_H__
 #define __COMMON_KCONFIG_H__
 
-#include <vmlinux.h>
+#include "vmlinux.h"
 #include <common.h>
 
 // TYPES

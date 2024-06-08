@@ -1,4 +1,7 @@
-#include <vmlinux.h>
+#ifndef DF_MAPS_H
+#define DF_MAPS_H
+
+#include "vmlinux.h"
 #include "type.h"
 #include <bpf/bpf_helpers.h>
 #include "include/bpf_base.h"
@@ -34,12 +37,12 @@ struct task_info_map {
     __type(value, task_info_t);
 } task_info_map SEC(".maps");
 
-struct config_map {
-    __uint(type, BPF_MAP_TYPE_ARRAY);
-    __uint(max_entries, 1);
-    __type(key, u32);
-    __type(value, config_entry_t);
-} config_map SEC(".maps");
+// struct config_map {
+//     __uint(type, BPF_MAP_TYPE_ARRAY);
+//     __uint(max_entries, 1);
+//     __type(key, u32);
+//     __type(value, config_entry_t);
+// } config_map SEC(".maps");
 
 struct kconfig_map {
     __uint(type, BPF_MAP_TYPE_HASH);
@@ -54,13 +57,6 @@ struct sys_enter_submit_tail {
     __type(key, u32);
     __type(value, u32);
 } sys_enter_submit_tail SEC(".maps");
-
-struct sys_enter_tails {
-    __uint(type, BPF_MAP_TYPE_PROG_ARRAY);
-    __uint(max_entries, MAX_EVENT_ID);
-    __type(key, u32);
-    __type(value, u32);
-} sys_enter_tails SEC(".maps");
 
 BPF_HASH(active_write_args_map, __u64, struct data_args_t)
 
@@ -86,3 +82,17 @@ MAP_PROG_ARRAY(progs_jmp_tp_map, __u32, __u32, PROG_TP_NUM)
 MAP_PERARRAY(data_buf, __u32, struct __socket_data_buffer, 1)
 
 MAP_PERF_EVENT(socket_data, int, __u32, MAX_CPU)
+
+BPF_HASH(trace_map, struct trace_key_t, struct trace_info_t)
+
+BPF_HASH(active_read_args_map, __u64, struct data_args_t)
+
+MAP_ARRAY(trace_stats_map, __u32, struct trace_stats, 1)
+
+MAP_ARRAY(allow_reasm_protos_map, int, bool, PROTO_NUM)
+
+BPF_HASH(socket_role_map, __u64, __u32);
+
+MAP_PERARRAY(io_event_buffer, __u32, struct __io_event_buffer, 1)
+
+#endif

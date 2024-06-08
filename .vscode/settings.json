@@ -20,6 +20,8 @@
         "initializer_list": "cpp",
         "type_traits": "cpp",
         "utility": "cpp",
-        "common.h": "c"
+        "common.h": "c",
+        "protocol_inference.h": "c",
+        "bpf_endian.h": "c"
     }
 }
