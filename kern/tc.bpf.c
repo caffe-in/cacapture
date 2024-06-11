@@ -16,11 +16,8 @@
 #include "bpf_endian.h"
 #include "bpf_tracing.h"
 #include "vmlinux.h"
-#include "common.h"
 #include "maps.h"
-#include "context.h"
 #include <bpf/bpf_helpers.h>
-#include "kconfig.h"
 #include <bpf/bpf_core_read.h>
 #define PT_REGS_PARM1(x) ((x)->di)
 #define PT_REGS_PARM2(x) ((x)->si)
@@ -168,7 +165,7 @@ static __always_inline int capture_packets(struct __sk_buff *skb, bool is_ingres
 
     // IP headers
     struct iphdr *iph = (struct iphdr *)(data_start + sizeof(struct ethhdr));
-
+    // ignore the data which sent to target ip using vxlan
     if (iph->saddr==bpf_htonl(target_ip)||iph->daddr==bpf_htonl(target_ip)){
         bpf_printk("the protocol should be vxlan addr to send %d\n", iph->protocol);
         return TC_ACT_OK;
@@ -198,35 +195,6 @@ static __always_inline int capture_packets(struct __sk_buff *skb, bool is_ingres
     // bpf_printk("the protocol is %d\n", conn_id.protocol);
     return TC_ACT_OK;
 }
-statfunc int save_to_submit_buf(args_buffer_t *buf, void *ptr, u32 size, u8 index)
-{
-    // Data saved to submit buf: [index][ ... buffer[size] ... ]
-
-    if (size == 0)
-        return 0;
-
-    barrier();
-    if (buf->offset > ARGS_BUF_SIZE - 1)
-        return 0;
-
-    // Save argument index
-    buf->args[buf->offset] = index;
-
-    // Satisfy verifier
-    if (buf->offset > ARGS_BUF_SIZE - (MAX_ELEMENT_SIZE + 1))
-        return 0;
-
-    // Read into buffer
-    if (bpf_probe_read(&(buf->args[buf->offset + 1]), size, ptr) == 0) {
-        // We update offset only if all writes were successful
-        buf->offset += size + 1;
-        buf->argnum++;
-        return 1;
-    }
-
-    return 0;
-}
-
 
 // egress_cls_func is called for packets that are going out of the network
 SEC("classifier")
@@ -240,124 +208,3 @@ int ingress_cls_func(struct __sk_buff *skb) {
     return capture_packets(skb, true);
     
 };
-
-SEC("raw_tracepoint/sys_enter")
-int tracepoint__raw_syscalls__sys_enter(struct bpf_raw_tracepoint_args *ctx)
-{
-    struct task_struct *task = (struct task_struct *) bpf_get_current_task();
-    int id = ctx->args[1];
-    bpf_tail_call(ctx, &sys_enter_init_tail, id);
-    return 0;
-}
-
-SEC("raw_tracepoint/sys_enter_init")
-int sys_enter_init(struct bpf_raw_tracepoint_args *ctx)
-{
-    struct task_struct *task = (struct task_struct *) bpf_get_current_task();
-
-    u64 pid_tgid = bpf_get_current_pid_tgid();
-    u32 tid = pid_tgid;
-    task_info_t *task_info = bpf_map_lookup_elem(&task_info_map, &tid);
-    if (unlikely(task_info == NULL)) {
-        task_info = init_task_info(tid, 0);
-        if (unlikely(task_info == NULL))
-            return 0;
-
-        int zero = 0;
-        config_entry_t *config = bpf_map_lookup_elem(&config_map, &zero);
-        if (unlikely(config == NULL))
-            return 0;
-
-        init_task_context(&task_info->context, task, config->options);
-    }
-
-    syscall_data_t *sys = &(task_info->syscall_data);
-    sys->id = ctx->args[1];
-
-    if (get_kconfig(ARCH_HAS_SYSCALL_WRAPPER)) {
-        struct pt_regs *regs = (struct pt_regs *) ctx->args[0];
-
-        if (is_x86_compat(task)) {
-#if defined(bpf_target_x86)
-            sys->args.args[0] = BPF_CORE_READ(regs, bx);
-            sys->args.args[1] = BPF_CORE_READ(regs, cx);
-            sys->args.args[2] = BPF_CORE_READ(regs, dx);
-            sys->args.args[3] = BPF_CORE_READ(regs, si);
-            sys->args.args[4] = BPF_CORE_READ(regs, di);
-            sys->args.args[5] = BPF_CORE_READ(regs, bp);
-#endif // bpf_target_x86
-        } else {
-            sys->args.args[0] = PT_REGS_PARM1_CORE_SYSCALL(regs);
-            sys->args.args[1] = PT_REGS_PARM2_CORE_SYSCALL(regs);
-            sys->args.args[2] = PT_REGS_PARM3_CORE_SYSCALL(regs);
-            sys->args.args[3] = PT_REGS_PARM4_CORE_SYSCALL(regs);
-            sys->args.args[4] = PT_REGS_PARM5_CORE_SYSCALL(regs);
-            sys->args.args[5] = PT_REGS_PARM6_CORE_SYSCALL(regs);
-        }
-    } else {
-        bpf_probe_read(sys->args.args, sizeof(6 * sizeof(u64)), (void *) ctx->args);
-    }
-
-    if (is_compat(task)) {
-        // Translate 32bit syscalls to 64bit syscalls, so we can send to the correct handler
-        u32 *id_64 = bpf_map_lookup_elem(&sys_32_to_64_map, &sys->id);
-        if (id_64 == 0)
-            return 0;
-
-        sys->id = *id_64;
-    }
-
-    // exit, exit_group and rt_sigreturn syscalls don't return
-    if (sys->id != SYSCALL_EXIT && sys->id != SYSCALL_EXIT_GROUP &&
-        sys->id != SYSCALL_RT_SIGRETURN) {
-        sys->ts = bpf_ktime_get_ns();
-        task_info->syscall_traced = true;
-    }
-
-    // if id is irrelevant continue to next tail call
-    bpf_tail_call(ctx, &sys_enter_submit_tail, sys->id);
-
-    // call syscall handler, if exists
-    bpf_tail_call(ctx, &sys_enter_tails, sys->id);
-    return 0;
-}
-SEC("raw_tracepoint/sys_enter_submit")
-int sys_enter_submit(struct bpf_raw_tracepoint_args *ctx)
-{
-    program_data_t p = {};
-    if (!init_program_data(&p, ctx, NO_EVENT_SUBMIT))
-        return 0;
-
-    syscall_data_t *sys = &p.task_info->syscall_data;
-
-    if (!reset_event(p.event, sys->id))
-        return 0;
-
-    if (!evaluate_scope_filters(&p))
-        goto out;
-
-    if (p.config->options & OPT_TRANSLATE_FD_FILEPATH && has_syscall_fd_arg(sys->id)) {
-        // Process filepath related to fd argument
-        uint fd_num = get_syscall_fd_num_from_arg(sys->id, &sys->args);
-        struct file *f = get_struct_file_from_fd(fd_num);
-
-        if (f) {
-            u64 ts = sys->ts;
-            fd_arg_path_t fd_arg_path = {};
-            void *file_path = get_path_str(__builtin_preserve_access_index(&f->f_path));
-
-            bpf_probe_read_kernel_str(&fd_arg_path.path, sizeof(fd_arg_path.path), file_path);
-            bpf_map_update_elem(&fd_arg_path_map, &ts, &fd_arg_path, BPF_ANY);
-        }
-    }
-
-    if (sys->id != SYSCALL_RT_SIGRETURN && !p.task_info->syscall_traced) {
-        save_to_submit_buf(&p.event->args_buf, (void *) &(sys->args.args[0]), sizeof(int), 0);
-        events_perf_submit(&p, 0);
-    }
-
-out:
-    // call syscall handler, if exists
-    bpf_tail_call(ctx, &sys_enter_tails, sys->id);
-    return 0;
-}
