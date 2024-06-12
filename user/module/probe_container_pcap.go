@@ -186,12 +186,6 @@ func (m *MContainerProbe) setupManagerPcap() error {
 		}
 
 	}
-	probes = append(probes, &manager.Probe{
-		Section:          "kprobe/security_socket_connect",
-		EbpfFuncName:     "kprobe__security_socket_connect",
-		AttachToFuncName: "security_socket_connect",
-	})
-
 	m.sslBpfFile = "tc.o" // assinged by caffein
 
 	netIfs, err := net.Interfaces()

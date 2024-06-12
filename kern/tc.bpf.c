@@ -16,11 +16,8 @@
 #include "bpf_endian.h"
 #include "bpf_tracing.h"
 #include "vmlinux.h"
-#include "common.h"
 #include "maps.h"
-#include "context.h"
 #include <bpf/bpf_helpers.h>
-#include "kconfig.h"
 #include <bpf/bpf_core_read.h>
 #define PT_REGS_PARM1(x) ((x)->di)
 #define PT_REGS_PARM2(x) ((x)->si)
@@ -168,7 +165,7 @@ static __always_inline int capture_packets(struct __sk_buff *skb, bool is_ingres
 
     // IP headers
     struct iphdr *iph = (struct iphdr *)(data_start + sizeof(struct ethhdr));
-
+    // ignore the data which sent to target ip using vxlan
     if (iph->saddr==bpf_htonl(target_ip)||iph->daddr==bpf_htonl(target_ip)){
         bpf_printk("the protocol should be vxlan addr to send %d\n", iph->protocol);
         return TC_ACT_OK;
