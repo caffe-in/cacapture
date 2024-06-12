@@ -366,14 +366,21 @@ static __inline int process_data(struct pt_regs *ctx, __u64 id,
 								 ssize_t bytes_count,
 								 const struct process_data_extra *extra)
 {
-	if (!extra)
+	if (!extra){
+		bpf_printk("extra is null\n", sizeof("extra is null\n"));
 		return -1;
+	}
+		
 
-	if (!extra->vecs && args->buf == NULL)
+	if (!extra->vecs && args->buf == NULL){
+		bpf_printk("args->buf is null\n", sizeof("args->buf is null\n"));
 		return -1;
+	}
 
-	if (extra->vecs && (args->iov == NULL || args->iovlen <= 0))
+	if (extra->vecs && (args->iov == NULL || args->iovlen <= 0)){
+		bpf_printk("args->iov is null\n", sizeof("args->iov is null\n"));
 		return -1;
+	}
 
 	if (unlikely(args->fd < 0 || (int)bytes_count <= 0))
 		return -1;
@@ -398,6 +405,7 @@ static __inline int process_data(struct pt_regs *ctx, __u64 id,
 	}
 
 	init_conn_info(id >> 32, args->fd, conn_info, sk, offset);
+
 
 	conn_info->direction = direction;
 	// ctx_info -> MAP_PERARRAY(ctx_info, __u32, struct ctx_info_s, 1) in include/map.h
@@ -452,6 +460,21 @@ static __inline int process_data(struct pt_regs *ctx, __u64 id,
 							  PROG_PROTO_INFER_KP_IDX);
 		}
 	}
+	// bpf_printk("conn_info->protocol:%d\n", conn_info->protocol);
+	if (conn_info->protocol != PROTO_UNKNOWN ||
+	    conn_info->message_type != MSG_UNKNOWN) {
+		/*
+		 * Fill in tail call context information.
+		 */
+		ctx_map->tail_call.conn_info = __conn_info;
+		ctx_map->tail_call.extra = *extra;
+		ctx_map->tail_call.bytes_count = bytes_count;
+		ctx_map->tail_call.offset = offset;
+
+		return 0;
+	}
+
+	return -1;
 }
 static __inline void process_syscall_data(struct pt_regs *ctx, __u64 id,
 										  const enum traffic_direction direction,
@@ -470,6 +493,7 @@ static __inline void process_syscall_data(struct pt_regs *ctx, __u64 id,
 	}
 	else
 	{
+		bpf_printk("process_data failed\n", sizeof("process_data failed\n"));
 		return;
 		// bpf_tail_call(ctx, &NAME(progs_jmp_tp_map),
 		// 			  PROG_IO_EVENT_TP_IDX);
@@ -489,6 +513,11 @@ int bpf_func_sys_enter_write(struct syscall_comm_enter_ctx *ctx)
 	write_args.fd = fd;
 	write_args.buf = buf;
 	write_args.enter_ts = bpf_ktime_get_ns();
+	if (write_args.buf == NULL)
+	{
+		bpf_printk("write_args.buf is null\n", sizeof("write_args.buf is null"));
+		return 0;
+	}
 	// write_args.tcp_seq = get_tcp_write_seq_from_fd(fd); what is the function of this statement?
 	active_write_args_map__update(&id, &write_args);
 	return 0;
@@ -499,14 +528,15 @@ int bpf_func_sys_exit_write(struct syscall_comm_exit_ctx *ctx)
 {
 	__u64 id = bpf_get_current_pid_tgid();
 	ssize_t bytes_count = ctx->ret;
-	bpf_printk("start read write_args\n",sizeof("start read write_args"));
 	struct data_args_t *write_args = active_write_args_map__lookup(&id);
-	bpf_printk("end read write_args\n",sizeof("end read write_args"));
 	if (write_args != NULL && write_args->fd > 2)
 	{
 		write_args->bytes_count = bytes_count;
 		process_syscall_data((struct pt_regs *)ctx, id, T_EGRESS,
 							 write_args, bytes_count);
+	}else{
+		if (write_args == NULL) bpf_printk("write_args is null\n",sizeof("write_args is null"));
+	
 	}
 	return 0;
 }

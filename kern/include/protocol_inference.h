@@ -1036,8 +1036,8 @@ infer_protocol(struct ctx_info_s *ctx,
 	 * is suitable for Linux5.2+
 	 */
 
-	__u32 pid = (__u32)bpf_get_current_pid_tgid();
-	__u32 cache_key = pid >> 16;
+	__u32 pid = bpf_get_current_pid_tgid()>>32;
+	__u32 cache_key = pid >> 32;
 	__u8 skip_proto = PROTO_UNKNOWN;
 	if (cache_key < PROTO_INFER_CACHE_SIZE)
 	{
@@ -1080,6 +1080,8 @@ infer_protocol(struct ctx_info_s *ctx,
 				return inferred_message;
 			}
 			break;
+		}
+	}
 		// for other L7 Protol, now pass them which will be implemented in the future
 		//
 		// case PROTO_REDIS:
@@ -1243,18 +1245,18 @@ infer_protocol(struct ctx_info_s *ctx,
 		// 		return inferred_message;
 		// 	}
 		// 	break;
-		default:
-			break;
-		}
+	// 	default:
+	// 		break;
+	// 	}
 
-		/*
-		 * Going here means that no hit is going to be counted in the
-		 * slow path. We want the slow path to skip this protocol inference
-		 * to avoid duplicate matches.
-		 */
-		skip_proto = this_proto;
-		conn_info->skip_proto = this_proto;
-	}
+	// 	/*
+	// 	 * Going here means that no hit is going to be counted in the
+	// 	 * slow path. We want the slow path to skip this protocol inference
+	// 	 * to avoid duplicate matches.
+	// 	 */
+	// 	skip_proto = this_proto;
+	// 	conn_info->skip_proto = this_proto;
+	// }
 
 	/*
 	 * Enter the slow matching path.
