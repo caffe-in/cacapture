@@ -5,7 +5,7 @@
 #include "common.h"
 #include "socket_trace.h"
 #include "socket_trace_common.h"
-#include "../maps.h"
+#include "maps.h"
 #include "bpf_endian.h"
 
 

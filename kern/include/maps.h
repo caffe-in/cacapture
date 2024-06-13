@@ -4,9 +4,9 @@
 #include "vmlinux.h"
 #include "type.h"
 #include <bpf/bpf_helpers.h>
-#include "include/bpf_base.h"
-#include "include/socket_trace.h"
-#include "include/socket_trace_common.h"
+#include "bpf_base.h"
+#include "socket_trace.h"
+#include "socket_trace_common.h"
 
 #define PROTO_INFER_CACHE_SIZE  80
 

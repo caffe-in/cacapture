@@ -2,7 +2,7 @@
 #include <bpf/bpf_core_read.h>
 #include <bpf/bpf_helpers.h>
 #include "include/socket_trace.h"
-#include "maps.h"
+#include "include/maps.h"
 #include "include/common.h"
 #include "vmlinux_missing.h"
 #include "include/bpf_endian.h"

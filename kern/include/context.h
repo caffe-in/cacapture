@@ -1,4 +1,4 @@
-#include "vmlinux.h"
+#include "../vmlinux.h"
 #include "common.h"
 #include "type.h"
 #include "maps.h"

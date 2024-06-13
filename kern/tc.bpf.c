@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "bpf_core_read.h"
-#include "bpf_endian.h"
-#include "bpf_tracing.h"
+#include "include/bpf_core_read.h"
+#include "include/bpf_endian.h"
+#include "include/bpf_tracing.h"
+#include "include/common.h"
 #include "vmlinux.h"
-#include "maps.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_core_read.h>
 #define PT_REGS_PARM1(x) ((x)->di)

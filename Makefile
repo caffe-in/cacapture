@@ -13,6 +13,10 @@ socket:
 vmlinux:
 	bpftool btf dump file /sys/kernel/btf/vmlinux format c > $(SRC_DIR)/vmlinux.h
 asset-tc:
+	mv kern/tc.o user/bytecode/tc.o
+	rm assets/ebpf_probe.go
 	go run github.com/shuLhan/go-bindata/cmd/go-bindata -pkg assets -o "assets/ebpf_probe.go" "user/bytecode/tc.o"
 asset-socket:
-	go run github.com/shuLhan/go-bindata/cmd/go-bindata -pkg assets -o "assets/ebpf_probe_socket.go" "kern/socket.o"
+	mv kern/socket.o user/bytecode/socket.o
+	rm assets/ebpf_probe.go
+	go run github.com/shuLhan/go-bindata/cmd/go-bindata -pkg assets -o "assets/ebpf_probe.go" "user/bytecode/socket.o"
