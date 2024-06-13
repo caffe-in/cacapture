@@ -145,3 +145,8 @@
    - 核心文件：
      - probe_container_pcap.go
      - probe_tc.go
+   
+   ## 其他说明
+   
+   - 微调，加载，使用LLM用于解决dcling 的问答问题：[看这里](others/readme_FinetuneModel.md)
+   - 关于deepflow的移植问题：[看这里]()
