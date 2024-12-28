@@ -1,5 +1,7 @@
 package event
 
+import "cacapture/user/container"
+
 type EventType uint8
 
 const (
@@ -11,6 +13,9 @@ const (
 
 	// EventTypeEventProcessor display by event_processor.
 	EventTypeEventProcessor
+
+	// EventTypeContainerStatusData set as container status data
+	EventTypeContainerStatusData
 )
 
 type IEventStruct interface {
@@ -24,4 +29,10 @@ type IEventStruct interface {
 	//SetModule(IModule)
 	EventType() EventType
 	GetUUID() string
+}
+
+type ContainerStatusIEventStruct interface {
+	IEventStruct
+	GetPid() int
+	UpdateContainerState(state *container.ContainerState) *container.ContainerState
 }

@@ -21,7 +21,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-	runtimeapi "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
+	runtimeapi "k8s.io/cri-api/pkg/apis/runtime/v1"
 )
 
 type PodNetworkInfo struct {
@@ -197,14 +197,10 @@ func (m *MContainerProbe) setupManagerPcap() error {
 	if err != nil {
 		return err
 	}
-
 	m.bpfManager = &manager.Manager{
 		Probes: probes,
 
 		Maps: []*manager.Map{
-			// {
-			// 	Name: "mastersecret_events",
-			// },
 			{
 				Name: "skb_events",
 			},
@@ -241,6 +237,18 @@ func (m *MContainerProbe) initDecodeFunPcap() error {
 	m.eventMaps = append(m.eventMaps, SkbEventsMap)
 	sslEvent := &event.TcSkbEvent{}
 	m.eventFuncMaps[SkbEventsMap] = sslEvent
+
+	//SyscallEventsMap 与解码函数映射
+	SyscallEventsMap, found, err := m.bpfManager.GetMap("syscall_events")
+	if err != nil {
+		return err
+	}
+	if !found {
+		return errors.New("cant found map:syscall_events")
+	}
+	m.eventMaps = append(m.eventMaps, SyscallEventsMap)
+	syscallEvent := &event.SyscallEvent{}
+	m.eventFuncMaps[SyscallEventsMap] = syscallEvent
 
 	return nil
 }

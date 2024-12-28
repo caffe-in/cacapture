@@ -8,5 +8,6 @@ const (
 	ProbeTypeXDP    = "XDP"
 )
 const (
-	ModuleNameContainer = "EBPFProbeContainer"
+	ModuleNameContainer      = "EBPFProbeContainer"
+	ModuleNameContainerState = "EBPFProbeContainerState"
 )

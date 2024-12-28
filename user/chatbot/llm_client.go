@@ -1,0 +1,160 @@
+package chatbot
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io/ioutil"
+	"net/http"
+)
+
+const COT_String = `{"kube-apiserver":对于当前列出的所有系统调用，没有直接标识出危险的行为。但如果从潜在风险的角度考虑，"setsockopt", "socket", 和 "accept4" 可能用于建立网络连接和监听端口，这在某些情况下可能被滥用以进行未经授权的通信或服务暴露。需要进一步监控这些操作的确切用途及其安全性,"kube-controller-manager":对于当前列出的所有系统调用，没有直接标识出危险的行为。但如果从潜在风险的角度考虑，“accept4” 可能用于建立网络监听，如果未正确配置可能会导致安全漏洞。需进一步审查其使用场景和安全性,"kube-scheduler":对于当前列出的所有系统调用，没有直接标识出危险的行为。但“accept4”可能涉及网络监听功能，若不适当管理可能导致潜在的安全风险,需要详细检查其具体应用场景和是否符合安全策略}
+{"kube-apiserver": "accept4: 可能被滥用进行未授权访问; setsockopt: 可能用于修改套接字行为以绕过安全策略", "kube-controller-manager": "futex: 虽然通常不危险，但在特定情况下可能被利用进行竞争条件攻击; madvise: 有可能被恶意使用来影响内存管理", "kube-scheduler": "madvise: 可能用于操纵内存分配以执行拒绝服务攻击"}`
+
+// LLMClient 用于与 LLM 服务交互
+type LLMClient struct {
+	BaseURL string
+	Headers map[string]string
+}
+
+// NewLLMClient 创建一个新的 LLMClient 实例
+func NewLLMClient(baseURL string, headers map[string]string) *LLMClient {
+	return &LLMClient{
+		BaseURL: baseURL,
+		Headers: headers,
+	}
+}
+
+// HTTP GET 请求
+func (c *LLMClient) httpGet(endpoint string) ([]byte, error) {
+	client := &http.Client{}
+	url := fmt.Sprintf("%s%s", c.BaseURL, endpoint)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create GET request: %w", err)
+	}
+
+	// 添加 Headers
+	for key, value := range c.Headers {
+		req.Header.Set(key, value)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send GET request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("GET request failed with status: %s", resp.Status)
+	}
+
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+	return body, nil
+}
+
+// HTTP POST 请求
+func (c *LLMClient) httpPost(endpoint string, payload map[string]interface{}) ([]byte, error) {
+	client := &http.Client{}
+	url := fmt.Sprintf("%s%s", c.BaseURL, endpoint)
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal payload: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(payloadBytes))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create POST request: %w", err)
+	}
+
+	// 添加 Headers
+	for key, value := range c.Headers {
+		req.Header.Set(key, value)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send POST request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("POST request failed with status: %s", resp.Status)
+	}
+
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+	return body, nil
+}
+
+// 获取 Profile ID
+func (c *LLMClient) GetProfileID() (string, error) {
+	body, err := c.httpGet("/api/application/profile")
+	if err != nil {
+		return "", fmt.Errorf("failed to get profile ID: %w", err)
+	}
+
+	var response map[string]interface{}
+	if err := json.Unmarshal(body, &response); err != nil {
+		return "", fmt.Errorf("failed to decode profile response: %w", err)
+	}
+
+	if data, ok := response["data"].(map[string]interface{}); ok {
+		if id, ok := data["id"].(string); ok {
+			return id, nil
+			fmt.Println("profile id:", id)
+		}
+	}
+
+	return "", fmt.Errorf("profile ID not found in response")
+}
+
+// 获取 Chat ID
+func (c *LLMClient) GetChatID(profileID string) (string, error) {
+	endpoint := fmt.Sprintf("/api/application/%s/chat/open", profileID)
+	body, err := c.httpGet(endpoint)
+	if err != nil {
+		return "", fmt.Errorf("failed to get chat ID: %w", err)
+	}
+
+	var response map[string]interface{}
+	if err := json.Unmarshal(body, &response); err != nil {
+		return "", fmt.Errorf("failed to decode chat response: %w", err)
+	}
+
+	if data, ok := response["data"].(string); ok {
+		return data, nil
+	}
+
+	return "", fmt.Errorf("chat ID not found in response")
+}
+
+// 发送聊天消息
+func (c *LLMClient) SendChatMessage(chatID string, payload map[string]interface{}) (string, error) {
+	endpoint := fmt.Sprintf("/api/application/chat_message/%s", chatID)
+	body, err := c.httpPost(endpoint, payload)
+	if err != nil {
+		return "", fmt.Errorf("failed to send chat message: %w", err)
+	}
+
+	// 打印完整的响应体
+
+	var response map[string]interface{}
+	if err := json.Unmarshal(body, &response); err != nil {
+		return "", fmt.Errorf("failed to decode chat message response: %w", err)
+	}
+
+	if data, ok := response["data"].(map[string]interface{}); ok {
+		if content, ok := data["content"].(string); ok {
+			return content, nil
+		}
+	}
+
+	return "", fmt.Errorf("content not found in chat message response")
+}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"cacapture/assets"
 	"cacapture/user/config"
+	"cacapture/user/container"
 	"cacapture/user/event"
 	"context"
 	"fmt"
@@ -40,6 +41,7 @@ type MContainerProbe struct {
 	sslBpfFile        string // ssl bpf file
 
 	UDP_conn *net.UDPConn
+	csm      *container.ContainerStateManager
 }
 
 func (m *MContainerProbe) Init(ctx context.Context, logger *log.Logger, conf config.IConfig) error {

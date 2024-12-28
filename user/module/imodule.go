@@ -11,6 +11,7 @@ import (
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/perf"
+	"github.com/cilium/ebpf/ringbuf"
 )
 
 // var dstAddr = &net.UDPAddr{
@@ -92,9 +93,11 @@ func (m *Module) Run() error {
 	// go func() {
 	// 	m.processor.Serve()
 	// }()
-	go func() {
-		m.child.(*MContainerProbe).InitUPDConn()
-	}()
+
+	// some panic here
+	// go func() {
+	// 	m.child.(*MContainerProbe).InitUPDConn()
+	// }()
 
 	err = m.readEvents()
 	if err != nil {
@@ -134,6 +137,8 @@ func (m *Module) readEvents() error {
 		switch {
 		case e.Type() == ebpf.PerfEventArray:
 			m.perfEventReader(errChan, e)
+		case e.Type() == ebpf.RingBuf:
+			m.ringbufEventReader(errChan, e)
 		default:
 			return fmt.Errorf("%s\tunsupported mapType:%s , mapinfo:%s",
 				m.child.Name(), e.Type().String(), e.String())
@@ -222,8 +227,50 @@ func (m *Module) perfEventReader(errChan chan error, em *ebpf.Map) {
 
 	}()
 }
+
+func (m *Module) ringbufEventReader(errChan chan error, em *ebpf.Map) {
+	rd, err := ringbuf.NewReader(em)
+	if err != nil {
+		errChan <- fmt.Errorf("%s\tcreating %s reader dns: %s", m.child.Name(), em.String(), err)
+		return
+	}
+	m.reader = append(m.reader, rd)
+	go func() {
+		for {
+			//判断ctx是不是结束
+			select {
+			case _ = <-m.ctx.Done():
+				m.logger.Printf("%s\tringbufEventReader received close signal from context.Done().", m.child.Name())
+				return
+			default:
+			}
+
+			record, err := rd.Read()
+			if err != nil {
+				if errors.Is(err, ringbuf.ErrClosed) {
+					m.logger.Printf("%s\tReceived signal, exiting..", m.child.Name())
+					return
+				}
+				errChan <- fmt.Errorf("%s\treading from ringbuf reader: %s", m.child.Name(), err)
+				return
+			}
+
+			var e event.IEventStruct
+			e, err = m.child.Decode(em, record.RawSample)
+			if err != nil {
+				m.logger.Printf("%s\tm.child.decode error:%v", m.child.Name(), err)
+				continue
+			}
+
+			// 上报数据
+			m.Dispatcher(e)
+		}
+	}()
+}
 func (m *Module) Dispatcher(e event.IEventStruct) {
 	switch e.EventType() {
+	case event.EventTypeOutput:
+		m.logger.Println(e.String())
 
 	case event.EventTypeModuleData:
 		// Save to cache

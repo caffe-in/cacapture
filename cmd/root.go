@@ -70,7 +70,7 @@ func cacaptureCommandFunc(cmd *cobra.Command, args []string) {
 
 	logger.Printf("cacapture pid info: %d", os.Getpid())
 
-	var modNames = []string{module.ModuleNameContainer}
+	var modNames = []string{module.ModuleNameContainer, module.ModuleNameContainerState}
 
 	var runMods uint8
 	var runModules = make(map[string]module.IModule)

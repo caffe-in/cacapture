@@ -32,7 +32,7 @@
         bpf_core_read((void *)&_val, sizeof(_val), &ptr);               \
         _val;                                                           \
     })
-
+    
 struct skb_data_event_t {
     uint64_t ts;
     u32 pid;
@@ -67,12 +67,6 @@ struct {
     __uint(max_entries, 10240);
 } skb_events SEC(".maps");
 
-struct events {
-    __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
-    __uint(max_entries, 1024);
-    __type(key, s32);
-    __type(value, u32);
-} syscall_events SEC(".maps");
 
 struct {
     __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
