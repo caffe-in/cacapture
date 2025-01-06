@@ -13,6 +13,7 @@ import (
 	"math"
 	"net/http"
 	"path/filepath"
+	"strings"
 
 	"github.com/cilium/ebpf"
 	manager "github.com/gojue/ebpfmanager"
@@ -108,13 +109,52 @@ func (m *MContainerStateProbe) setupManagerPcap() error {
 		Section:      "tracepoint/raw_syscalls/sys_enter",
 		EbpfFuncName: "sys_enter",
 	}
+	fileEnterReadProbe := &manager.Probe{
+		Section:          "kprobe/vfs_read",
+		EbpfFuncName:     "vfs_read",
+		AttachToFuncName: "vfs_read",
+	}
+	fileEnterWriteProbe := &manager.Probe{
+		Section:          "kprobe/vfs_write",
+		EbpfFuncName:     "vfs_write",
+		AttachToFuncName: "vfs_write",
+	}
+	mountEnterProbe := &manager.Probe{
+		Section:      "tracepoint/syscalls/sys_enter_mount",
+		EbpfFuncName: "mount_entry",
+	}
+	mountExitProbe := &manager.Probe{
+		Section:      "tracepoint/syscalls/sys_exit_mount",
+		EbpfFuncName: "mount_exit",
+	}
+	unmountEnterProbe := &manager.Probe{
+		Section:      "tracepoint/syscalls/sys_enter_umount",
+		EbpfFuncName: "umount_entry",
+	}
+	unmountExitProbe := &manager.Probe{
+		Section:      "tracepoint/syscalls/sys_exit_umount",
+		EbpfFuncName: "umount_exit",
+	}
+
 	probes = append(probes, syscallEnterProbe)
+	probes = append(probes, fileEnterReadProbe)
+	probes = append(probes, fileEnterWriteProbe)
+	probes = append(probes, mountEnterProbe)
+	probes = append(probes, mountExitProbe)
+	probes = append(probes, unmountEnterProbe)
+	probes = append(probes, unmountExitProbe)
 	m.bpfManager = &manager.Manager{
 		Probes: probes,
 
 		Maps: []*manager.Map{
 			{
 				Name: "syscall_events",
+			},
+			{
+				Name: "file_events",
+			},
+			{
+				Name: "mount_events",
 			},
 		},
 	}
@@ -148,21 +188,47 @@ func (m *MContainerStateProbe) initDecodeFunPcap() error {
 	if !found {
 		return errors.New("cant found map:syscall_events")
 	}
+	FileEventsMap, found, err := m.bpfManager.GetMap("file_events")
+	if err != nil {
+		return err
+	}
+	if !found {
+		return errors.New("cant found map:file_events")
+	}
+	MountEventsMap, found, err := m.bpfManager.GetMap("mount_events")
+	if err != nil {
+		return err
+	}
+
 	m.eventMaps = append(m.eventMaps, SyscallEventsMap)
+	m.eventMaps = append(m.eventMaps, FileEventsMap)
+	m.eventMaps = append(m.eventMaps, MountEventsMap)
+
 	syscallEvent := &event.SyscallEvent{}
+	fileEvent := &event.FileEvent{}
+	mountEvent := &event.MountEvent{}
 	m.eventFuncMaps[SyscallEventsMap] = syscallEvent
+	m.eventFuncMaps[FileEventsMap] = fileEvent
+	m.eventFuncMaps[MountEventsMap] = mountEvent
 
 	return nil
 }
 
 func (m *MContainerStateProbe) Dispatcher(e event.IEventStruct) {
 	if ecs, ok := e.(event.ContainerStatusIEventStruct); ok {
+
 		pid := ecs.GetPid()
 		state, ok := m.csm.GetContainerStateByPID(pid)
+		if _, ok := e.(*event.MountEvent); ok {
+			fmt.Println("mount event, container id is ", pid)
+		}
 		if !ok {
+			// m.logger.Printf("pid:%d not found in container state map,probably the init container status failed", pid)
 			// m.logger.Printf("pid:%d not found in container state map", pid)
 		} else {
-			// m.logger.Printf("pid:%d found in container state map", pid)
+			if strings.Contains(state.ContainerName, "nginx") {
+				m.logger.Printf("pid:%d found in container state map, containerName:%s", pid, state.ContainerName)
+			}
 			newState := ecs.UpdateContainerState(state)
 			m.csm.UpdateContainerState(pid, newState)
 		}

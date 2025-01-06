@@ -24,6 +24,7 @@
         "protocol_inference.h": "c",
         "bpf_endian.h": "c",
         "syscall.h": "c",
-        "errno.h": "c"
+        "errno.h": "c",
+        "files.h": "c"
     }
 }

@@ -51,6 +51,10 @@ type ContainerStateManager struct {
 	containerSyscallCounter *prometheus.GaugeVec
 	containerPIDGauge       *prometheus.GaugeVec
 
+	containerFileBytesCounter *prometheus.GaugeVec
+
+	containerMountCounter *prometheus.GaugeVec
+
 	// Contact with LLM
 	llm_client *chatbot.LLMClient
 }
@@ -196,6 +200,21 @@ func NewContainerStateManager() *ContainerStateManager {
 			},
 			[]string{"container_name", "pod_name", "namespace"},
 		),
+
+		containerFileBytesCounter: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "container_file_bytes",
+				Help: "The total number of bytes read/written by containers, labeled by container name, pod name, namespace, file name and operation",
+			},
+			[]string{"container_name", "pod_name", "namespace", "file_name", "operation"},
+		),
+		containerMountCounter: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "container_mount_count",
+				Help: "The current number of mount operations made by containers, labeled by container name, pod name, ns,fs type, mount ret",
+			},
+			[]string{"container_name", "pod_name", "namespace", "fs_type", "mount_ret"},
+		),
 		llm_client: chatbot.NewLLMClient(baseURL, headers),
 	}
 
@@ -203,6 +222,8 @@ func NewContainerStateManager() *ContainerStateManager {
 	prometheus.MustRegister(csm.containerCount)
 	prometheus.MustRegister(csm.containerSyscallCounter)
 	prometheus.MustRegister(csm.containerPIDGauge)
+	prometheus.MustRegister(csm.containerFileBytesCounter)
+	prometheus.MustRegister(csm.containerMountCounter)
 
 	return csm
 }
@@ -233,12 +254,25 @@ func (sm *ContainerStateManager) UpdateContainerState(pid int, state *ContainerS
 
 // 更新prometheus数据
 func (sm *ContainerStateManager) UpdatePrometheusData(state *ContainerState) {
+	state.Mutex.Lock()
+	defer state.Mutex.Unlock()
+	// 更新syscall data
 	for syscall, count := range state.SyscallCount {
 		sm.containerSyscallCounter.WithLabelValues(state.ContainerName, state.PodName, state.Namespace, syscall).Set(float64(count))
 	}
+	// 更新file data
+	for _, stats := range state.FileOperations {
+		sm.containerFileBytesCounter.WithLabelValues(state.ContainerName, state.PodName, state.Namespace, stats.Filename, "read").Set(float64(stats.TotalReadBytes))
+		sm.containerFileBytesCounter.WithLabelValues(state.ContainerName, state.PodName, state.Namespace, stats.Filename, "write").Set(float64(stats.TotalWriteBytes))
+	}
+	for fsType, mountStats := range state.FsMountStats {
+		sm.containerMountCounter.WithLabelValues(state.ContainerName, state.PodName, state.Namespace, fsType, "success").Set(float64(mountStats.SuccessCount))
+		sm.containerMountCounter.WithLabelValues(state.ContainerName, state.PodName, state.Namespace, fsType, "failed").Set(float64(mountStats.FailedCount))
+	}
+
 }
 
-func (sm *ContainerStateManager) UpdateLokiData(containerStates map[string]string) error {
+func (sm *ContainerStateManager) UpdateAllLokiData(containerStates map[string]string) error {
 	// 构造多个日志流（streams）
 	var streams []loki.LokiStream
 
@@ -262,6 +296,57 @@ func (sm *ContainerStateManager) UpdateLokiData(containerStates map[string]strin
 
 		streams = append(streams, stream)
 	}
+
+	// 构造请求的 Payload
+	payload := loki.LokiPushPayload{
+		Streams: streams,
+	}
+
+	// 将 Payload 转换为 JSON
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal Loki payload: %v", err)
+	}
+
+	// 发送 HTTP 请求到 Loki
+	resp, err := http.Post("http://localhost:3100/loki/api/v1/push", "application/json", bytes.NewBuffer(payloadBytes))
+	if err != nil {
+		return fmt.Errorf("failed to send logs to Loki: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// 检查响应
+	if resp.StatusCode != http.StatusNoContent {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("unexpected response from Loki: %s, body: %s", resp.Status, string(body))
+	}
+
+	fmt.Println("All logs sent to Loki successfully!")
+	return nil
+}
+
+func (sm *ContainerStateManager) UpdateLokiData(containerName string, llmResponse string) error {
+	// 构造多个日志流（streams）
+	var streams []loki.LokiStream
+
+	// 生成时间戳
+	timestamp := strconv.FormatInt(time.Now().UTC().UnixNano(), 10)
+
+	// 构造日志条目
+	values := [][]string{
+		{timestamp, llmResponse},
+	}
+
+	// 构造日志流
+	stream := loki.LokiStream{
+		Stream: map[string]string{
+			"job":       "container_manager",
+			"container": containerName,
+		},
+		Values: values,
+	}
+
+	streams = append(streams, stream)
 
 	// 构造请求的 Payload
 	payload := loki.LokiPushPayload{
@@ -406,6 +491,14 @@ func (sm *ContainerStateManager) HandlePodDeleted(pod *v1.Pod) {
 				for syscall := range state.SyscallCount {
 					sm.containerSyscallCounter.DeleteLabelValues(state.ContainerName, state.PodName, state.Namespace, syscall) // 删除对应的系统调用计数
 				}
+				for _, stats := range state.FileOperations {
+					sm.containerFileBytesCounter.DeleteLabelValues(state.ContainerName, state.PodName, state.Namespace, stats.Filename, "read")
+					sm.containerFileBytesCounter.DeleteLabelValues(state.ContainerName, state.PodName, state.Namespace, stats.Filename, "write")
+				}
+				for fsType := range state.FsMountStats {
+					sm.containerMountCounter.DeleteLabelValues(state.ContainerName, state.PodName, state.Namespace, fsType, "success")
+					sm.containerMountCounter.DeleteLabelValues(state.ContainerName, state.PodName, state.Namespace, fsType, "failed")
+				}
 				break
 			}
 		}
@@ -473,6 +566,23 @@ func (sm *ContainerStateManager) DescribeAllContainerStates() string {
 		for syscall, count := range state.SyscallCount {
 			syscallDescriptions = append(syscallDescriptions, fmt.Sprintf("%s 为 %d 次", syscall, count))
 		}
+		// 添加文件操作描述
+		if len(state.FileOperations) > 0 {
+			fileDescriptions := []string{}
+			for _, fileStats := range state.FileOperations {
+				// 统计该文件的总读写字节数
+				fileDescription := fmt.Sprintf(
+					"文件 \"%s\" 执行了 %d 次读取（共 %d 字节），%d 次写入（共 %d 字节）",
+					fileStats.Filename,
+					fileStats.TotalReads, fileStats.TotalReadBytes,
+					fileStats.TotalWrites, fileStats.TotalWriteBytes,
+				)
+				fileDescriptions = append(fileDescriptions, fileDescription)
+			}
+			description += " 文件操作统计如下：" + strings.Join(fileDescriptions, "；") + "。"
+		} else {
+			description += " 当前没有记录到文件操作统计。"
+		}
 
 		// 拼接单个容器的描述
 		description += strings.Join(syscallDescriptions, ",") + "。"
@@ -481,9 +591,9 @@ func (sm *ContainerStateManager) DescribeAllContainerStates() string {
 	}
 
 	// 拼接问题
-	quesion := "在这些容器系统调用中，是否存在危险的系统调用？如果有请指出哪些容器，以及危险的系统调用。如果没有请直接回答没有"
+	quesion := "在这些容器系统调用和文件操作中，是否存在危险的操作？如果有请指出哪些容器，以及危险的操作和原因。如果没有请直接回答没有"
 	// 指定返回格式
-	format := "你必须以这种格式回答：\n{容器1名:对于容器1的危险系统调用及其原因,容器2名:对于容器2的危险系统调用及其原因,...}\n 既你必须返回一个json格式的字符串,其中键为容器名,这个是个string,值为对应容器的危险系统调用及其原因,这个也是一个string,除此之外不要回答任何信息"
+	format := "你必须以这种格式回答：\n{容器1名:对于容器1的危险操作及其原因,容器2名:对于容器2的危险系操作及其原因,...}\n 既你必须返回一个json格式的字符串,其中键为容器名,这个是个string,值为对应容器的危险系统调用及其原因,这个也是一个string,除此之外不要回答任何信息"
 	descriptions = append(descriptions, quesion)
 	descriptions = append(descriptions, format)
 	cot_string := "例如：" + chatbot.COT_String
@@ -492,8 +602,65 @@ func (sm *ContainerStateManager) DescribeAllContainerStates() string {
 	return strings.Join(descriptions, "\n")
 }
 
+// DescribeContainerState 将单个容器状态描述为自然语言消息
+func (sm *ContainerStateManager) DescribeContainerState(state *ContainerState) string {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	description := fmt.Sprintf(
+		"容器 \"%s\" (ID: %s) 位于命名空间 \"%s\" 中，属于 Pod \"%s\"。当前系统调用统计如下：",
+		state.ContainerName, state.ContainerID, state.Namespace, state.PodName,
+	)
+
+	// 添加系统调用统计信息
+	syscallDescriptions := []string{}
+	for syscall, count := range state.SyscallCount {
+		syscallDescriptions = append(syscallDescriptions, fmt.Sprintf("%s 为 %d 次", syscall, count))
+	}
+
+	// 拼接系统调用描述
+	description += strings.Join(syscallDescriptions, ",") + "。"
+
+	// 添加文件操作描述
+	if len(state.FileOperations) > 0 {
+		fileDescriptions := []string{}
+		for _, fileStats := range state.FileOperations {
+			// 统计该文件的总读写字节数
+			fileDescription := fmt.Sprintf(
+				"文件 \"%s\" 执行了 %d 次读取（共 %d 字节），%d 次写入（共 %d 字节）",
+				fileStats.Filename,
+				fileStats.TotalReads, fileStats.TotalReadBytes,
+				fileStats.TotalWrites, fileStats.TotalWriteBytes,
+			)
+			fileDescriptions = append(fileDescriptions, fileDescription)
+		}
+		description += " 文件操作统计如下：" + strings.Join(fileDescriptions, "；") + "。"
+	} else {
+		description += " 当前没有记录到文件操作统计。"
+	}
+
+	// 拼接mount描述
+	if len(state.MountHistory) > 0 {
+		mountDescriptions := []string{}
+		for _, mount := range state.MountHistory {
+			mountDescriptions = append(mountDescriptions, mount)
+		}
+		description += " 挂载历史记录如下：" + strings.Join(mountDescriptions, "；") + "。"
+	} else {
+		description += " 当前没有记录到挂载历史记录。"
+	}
+	// 拼接问题
+	question := "在这个容器的系统调用,文件操作和挂载操作中中，是否存在危险的操作？如果有请指出危险的操作及原因。如果没有请直接回答没有。"
+	// format := "你必须以这种格式回答：\n{\"容器名\":\"危险操作及其原因\"}\n 既你必须返回一个json格式的字符串,键为容器名（string），值为对应容器的危险操作及其原因（string）。除此之外不要回答任何信息。"
+	// cotString := "例如：" + chatbot.COT_String
+
+	// 最终拼接
+	fmt.Println(description + "\n" + question)
+	return description + "\n" + question
+}
+
 // MonitorContainersWithLLM 定期发送所有容器状态到 LLM
-func (sm *ContainerStateManager) MonitorContainersWithLLM() {
+func (sm *ContainerStateManager) MonitorAllContainersWithLLM() {
 	ticker := time.NewTicker(1 * time.Minute) // 每 1 分钟执行一次
 	defer ticker.Stop()
 
@@ -529,7 +696,7 @@ func (sm *ContainerStateManager) MonitorContainersWithLLM() {
 			if err != nil {
 				fmt.Printf("Failed to parse LLM response: %v\n", err)
 			}
-			err = sm.UpdateLokiData(containerLLMResponse)
+			err = sm.UpdateAllLokiData(containerLLMResponse)
 			if err != nil {
 				fmt.Printf("Failed to update Loki data: %v\n", err)
 			} else {
@@ -537,6 +704,64 @@ func (sm *ContainerStateManager) MonitorContainersWithLLM() {
 			}
 			// 根据返回结果采取相应行动
 			// TODO: 增加报警或日志记录
+		}
+	}
+}
+
+// MonitorContainersWithLLM 定期发送每个容器状态到 LLM
+func (sm *ContainerStateManager) MonitorContainersWithLLM() {
+	ticker := time.NewTicker(1 * time.Minute) // 每 1 分钟执行一次
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			// 遍历每个容器状态
+			sm.mu.RLock()
+			containerStates := make(map[int]*ContainerState)
+			// 复制所有容器状态
+			for pid, state := range sm.stateByPID {
+				containerStates[pid] = state
+			}
+			sm.mu.RUnlock() // 解锁，允许其他协程访问共享资源
+			for pid, state := range containerStates {
+				// 构造单个容器状态的描述
+				description := sm.DescribeContainerState(state)
+
+				// 构建发送给 LLM 的 Payload
+				payload := map[string]interface{}{
+					"message": description,
+					"re_chat": false,
+					"stream":  false,
+				}
+
+				// 获取 Chat ID
+				profileID, err := sm.llm_client.GetProfileID()
+				if err != nil {
+					fmt.Printf("Failed to get profile ID for PID %d: %v\n", pid, err)
+					continue
+				}
+				chatID, err := sm.llm_client.GetChatID(profileID)
+				if err != nil {
+					fmt.Printf("Failed to get chat ID for PID %d: %v\n", pid, err)
+					continue
+				}
+
+				// 调用 sendChatMessage 函数，发送给大模型
+				containerLLMResponse, err := sm.llm_client.SendChatMessage(chatID, payload)
+				if err != nil {
+					fmt.Printf("Failed to send container state for PID %d to LLM: %v\n", pid, err)
+					continue
+				}
+				fmt.Println("LLM response:", containerLLMResponse)
+				// 更新 Loki 数据
+				err = sm.UpdateLokiData(state.ContainerName, containerLLMResponse)
+				if err != nil {
+					fmt.Printf("Failed to update Loki data for PID %d: %v\n", pid, err)
+				} else {
+					fmt.Printf("Updated Loki data successfully for PID %d\n", pid)
+				}
+			}
 		}
 	}
 }
